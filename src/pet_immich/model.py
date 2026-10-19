@@ -26,9 +26,14 @@ _MINIMUM_SIMILARITY: Final = 0.4
 _MINIMUM_GROUPS: Final = 5
 
 
-def train(samples: list[Sample], features: Features, *, error_cost: float = 5) -> tuple[IdentityModel, _Report]:
+def train(
+    samples: list[Sample], features: Features, *, error_cost: float = 5, training_fraction: float = 1
+) -> tuple[IdentityModel, _Report]:
     """Select thresholds inside each fold so outer observations remain evaluation data."""
     validate_error_cost(error_cost)
+    if not 0 < training_fraction <= 1:
+        msg = "Training fraction must be greater than zero and at most one"
+        raise ValueError(msg)
     indices = {value: index for index, value in enumerate(features.ids)}
     labeled = [sample for sample in samples if sample.label not in {None, UNCERTAIN} and sample.id in indices]
     rows = np.asarray([indices[sample.id] for sample in labeled], dtype=np.int64)
@@ -48,7 +53,8 @@ def train(samples: list[Sample], features: Features, *, error_cost: float = 5) -
     matrices["linear"] = matrices["fused"]
     predicted = np.full(len(rows), "", dtype="U128")
     decisions: list[_Fold] = []
-    for fold, (training, testing) in enumerate(splits(targets, groups, 5)):
+    for fold, (available, testing) in enumerate(splits(targets, groups, 5)):
+        training = _subsample_training(available, targets, groups, training_fraction)
         candidate, selection = select_model(
             {name: values[training] for name, values in matrices.items()},
             targets[training],
@@ -58,20 +64,41 @@ def train(samples: list[Sample], features: Features, *, error_cost: float = 5) -
         predicted[testing] = np.where(
             features.valid[rows[testing]], candidate.predict(matrices[candidate.mode][testing]), ""
         )
-        decisions.append({"fold": fold, "selection": selection, "test_samples": len(testing)})
+        decisions.append({
+            "fold": fold,
+            "selection": selection,
+            "test_samples": len(testing),
+            "training_samples": len(training),
+        })
     report = metrics(targets, predicted, groups, names)
     report["folds"] = decisions
     report["samples"] = len(rows)
     report["groups"] = len(set(groups))
     report["class_counts"] = dict(Counter(targets.tolist()))
     report["method"] = "nested grouped CV; inner model/threshold selection; outer evaluation only"
+    report["training_fraction"] = training_fraction
     report["error_cost"] = error_cost
     report["passed"] = passes(report, error_cost)
     final, selection = select_model(matrices, targets, groups, error_cost)
     final.signature = features.signature
-    final.approved = report["passed"]
+    final.approved = report["passed"] and training_fraction == 1
     report["final_selection"] = selection
     return final, report
+
+
+def _subsample_training(
+    training: NDArray[np.int64],
+    targets: NDArray[np.str_],
+    groups: NDArray[np.int32],
+    fraction: float,
+) -> NDArray[np.int64]:
+    # Retain the rare unknown examples while measuring the value of more known-pet events.
+    selected = set(groups[training][targets[training] == UNKNOWN])
+    random = np.random.default_rng(42)
+    for name in sorted(set(targets) - {UNKNOWN}):
+        events = random.permutation(np.unique(groups[training][targets[training] == name]))
+        selected.update(events[: int(np.ceil(len(events) * fraction))])
+    return training[np.isin(groups[training], list(selected))]
 
 
 def validate_error_cost(error_cost: float) -> None:
@@ -310,6 +337,7 @@ class _Fold(TypedDict):
     fold: int
     selection: _Selection
     test_samples: int
+    training_samples: int
 
 
 class _Report(TypedDict):
@@ -323,6 +351,7 @@ class _Report(TypedDict):
     method: NotRequired[str]
     passed: NotRequired[bool]
     error_cost: NotRequired[float]
+    training_fraction: NotRequired[float]
     final_selection: NotRequired[_Selection]
 
 

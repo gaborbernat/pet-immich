@@ -152,3 +152,19 @@ def test_calibration_balances_recovery_against_incorrect_assignments(
 def test_training_rejects_invalid_error_cost(population: tuple[list[Sample], Features], cost: float) -> None:
     with pytest.raises(ValueError, match="Error cost"):
         train(*population, error_cost=cost)
+
+
+@pytest.mark.parametrize("fraction", [0, -1, 1.1, float("nan")], ids=["zero", "negative", "too-large", "nan"])
+def test_training_rejects_invalid_fraction(population: tuple[list[Sample], Features], fraction: float) -> None:
+    with pytest.raises(ValueError, match="Training fraction"):
+        train(*population, training_fraction=fraction)
+
+
+def test_learning_curve_preserves_test_events(population: tuple[list[Sample], Features]) -> None:
+    _, full = train(*population)
+    _, reduced = train(*population, training_fraction=0.5)
+    assert [row["test_samples"] for row in reduced["folds"]] == [row["test_samples"] for row in full["folds"]]
+    assert all(
+        small["training_samples"] < large["training_samples"]
+        for small, large in zip(reduced["folds"], full["folds"], strict=True)
+    )

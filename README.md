@@ -65,6 +65,10 @@ of `Both` needs individual crop labels for training.
 `plan.json` lists proposed assignments and conflicts. `apply` verifies each creation and records it in `applied.json`.
 Model and preprocessing signatures bind classifiers to their feature caches.
 
+For a learning-curve experiment, `train --training-fraction 0.5` samples capture groups for each known pet within the
+training folds. Co-occurring pets stay together; unknown-animal examples and evaluation folds remain complete. The
+report records actual training counts. Such runs do not replace the approved model.
+
 ## Compare models
 
 ```sh

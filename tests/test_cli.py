@@ -228,3 +228,12 @@ def test_cli_keeps_each_requested_operating_point(inference_state: Path, monkeyp
     main()
     reports = json.loads((inference_state / "comparison.json").read_text())
     assert {name: report["error_cost"] for name, report in reports.items()} == {"raw@cost=2": 2, "raw@cost=20": 20}
+
+
+def test_cli_learning_curve_preserves_live_model(inference_state: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    previous = (inference_state / "approved.joblib").read_bytes()
+    monkeypatch.setattr(
+        "sys.argv", ["pet-immich", "train", "--state", str(inference_state), "--training-fraction", "0.5"]
+    )
+    main()
+    assert (inference_state / "approved.joblib").read_bytes() == previous

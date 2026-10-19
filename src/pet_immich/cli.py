@@ -35,6 +35,7 @@ def main() -> None:
     parser.add_argument("--similarities", type=Path)
     parser.add_argument("--duplicates", action="store_true")
     parser.add_argument("--error-cost", type=float, nargs="+", default=[5.0])
+    parser.add_argument("--training-fraction", type=float, default=1.0)
     args = parser.parse_args()
     os.umask(0o077)
     args.state.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -59,17 +60,20 @@ def main() -> None:
     elif args.command == "compare":
         _compare(args)
     elif args.command == "train":
-        _train(args.state, args.error_cost)
+        _train(args.state, args.error_cost, args.training_fraction)
     else:
         run(args.state, apply=args.command in {"apply", "sync", "export-encoder"}, sync=args.command == "sync")
 
 
-def _train(directory: Path, error_costs: list[float]) -> None:
+def _train(directory: Path, error_costs: list[float], training_fraction: float) -> None:
     if len(error_costs) != 1:
         msg = "train requires exactly one error cost"
         raise ValueError(msg)
     model, report = train(
-        load_samples(directory / "samples.json"), Features.load(directory / "features.npz"), error_cost=error_costs[0]
+        load_samples(directory / "samples.json"),
+        Features.load(directory / "features.npz"),
+        error_cost=error_costs[0],
+        training_fraction=training_fraction,
     )
     stream = io.BytesIO()
     joblib.dump(model, stream)
@@ -78,7 +82,7 @@ def _train(directory: Path, error_costs: list[float]) -> None:
     sys.stdout.write(json.dumps(report, indent=2) + "\n")
     if model.approved:
         private_write(directory / "approved.joblib", stream.getvalue())
-    else:
+    elif training_fraction == 1:
         msg = "Validation failed; candidate was not promoted"
         raise SystemExit(msg)
 
