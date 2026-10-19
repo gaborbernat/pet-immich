@@ -110,9 +110,10 @@ type = "layers"
 containers = [ "pet_immich" ]
 layers = [
   "cli",
+  "adaptation",
   "runtime | benchmark",
   "model | importer | encoder",
-  "extract | metric | grouping | matching",
+  "extract | metric | grouping | matching | detect",
   "miewid",
   "data | network"
 ]

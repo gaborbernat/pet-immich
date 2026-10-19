@@ -7,15 +7,19 @@ import os
 import sys
 from pathlib import Path
 
+import httpx
 import joblib
 import numpy as np
 
+from pet_immich.adaptation import compare_adaptation
 from pet_immich.benchmark import compare
 from pet_immich.data import Features, load_samples, private_write, save_samples
+from pet_immich.detect import scan_missing
 from pet_immich.encoder import export_encoder
 from pet_immich.extract import extract
 from pet_immich.importer import import_legacy
 from pet_immich.model import train
+from pet_immich.network import local_request
 from pet_immich.runtime import run
 
 
@@ -23,7 +27,8 @@ def main() -> None:
     """Keep training and application explicit so scheduled runs cannot retrain themselves."""
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "command", choices=["import", "extract", "train", "compare", "plan", "apply", "sync", "export-encoder"]
+        "command",
+        choices=["import", "extract", "train", "compare", "plan", "apply", "sync", "export-encoder", "detect", "adapt"],
     )
     parser.add_argument("--state", type=Path, required=True)
     parser.add_argument("--database", type=Path)
@@ -32,6 +37,8 @@ def main() -> None:
     parser.add_argument("--labeled-only", action="store_true")
     parser.add_argument("--source")
     parser.add_argument("--refresh", action="store_true")
+    parser.add_argument("--foreground", action="store_true")
+    parser.add_argument("--steps", type=int, default=300)
     parser.add_argument("--similarities", type=Path)
     parser.add_argument("--duplicates", action="store_true")
     parser.add_argument("--error-cost", type=float, nargs="+", default=[5.0])
@@ -46,23 +53,45 @@ def main() -> None:
             parser.error("export-encoder requires --source")
         export_encoder(args.source, args.state / "models" / "encoder.onnx")
         return
-    samples_path = args.state / "samples.json"
     if args.command == "import":
         if not all((args.database, args.labels, args.metadata)):
             parser.error("import requires --database, --labels, and --metadata")
         _import(args)
         return
-    samples = load_samples(samples_path)
+    if args.command in {"detect", "adapt"}:
+        {"detect": _detect, "adapt": _adapt}[args.command](args)
+        return
     if args.command == "extract":
-        if args.labeled_only:
-            samples = [sample for sample in samples if sample.label is not None]
-        extract(samples, args.state, os.environ["PET_TAGGER_URL"], refresh=args.refresh)
+        _extract(args)
     elif args.command == "compare":
         _compare(args)
     elif args.command == "train":
         _train(args.state, args.error_cost, args.training_fraction)
     else:
         run(args.state, apply=args.command in {"apply", "sync", "export-encoder"}, sync=args.command == "sync")
+
+
+def _extract(args: argparse.Namespace) -> None:
+    samples = load_samples(args.state / "samples.json")
+    if args.labeled_only:
+        samples = [sample for sample in samples if sample.label is not None]
+    extract(samples, args.state, os.environ["PET_TAGGER_URL"], refresh=args.refresh)
+
+
+def _adapt(args: argparse.Namespace) -> None:
+    compare_adaptation(args.state, os.environ["PET_TAGGER_URL"], foreground=args.foreground, steps=args.steps)
+
+
+def _detect(args: argparse.Namespace) -> None:
+    directory = args.state
+    with httpx.Client(
+        base_url=os.environ["IMMICH_URL"],
+        headers={"x-api-key": os.environ.get("IMMICH_READ_API_KEY", os.environ["IMMICH_API_KEY"])},
+        trust_env=False,
+        event_hooks={"request": [local_request]},
+        timeout=60,
+    ) as client:
+        scan_missing(directory, client, os.environ["PET_TAGGER_URL"], directory / "models" / "detector.pt")
 
 
 def _train(directory: Path, error_costs: list[float], training_fraction: float) -> None:

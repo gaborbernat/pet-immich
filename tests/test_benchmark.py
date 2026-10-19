@@ -1,10 +1,14 @@
 from dataclasses import replace
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
 
 from pet_immich.benchmark import compare
 from pet_immich.data import UNKNOWN, Features, Matrix, Sample
+
+if TYPE_CHECKING:
+    from numpy.typing import NDArray
 
 
 def test_compositions_recover_identities_on_shared_events(population: tuple[list[Sample], Features]) -> None:
@@ -85,4 +89,20 @@ def test_comparison_exposes_recovery_error_tradeoff(
     assert (result["identities"]["pet-a"]["correct"], result["identities"]["pet-a"]["incorrect"]) == (
         correct,
         incorrect,
+    )
+
+
+def test_learned_channels_receive_only_training_references(population: tuple[list[Sample], Features]) -> None:
+    samples, features = population
+    references = []
+
+    def learn(training: NDArray[np.int64]) -> Matrix:
+        references.append(set(training.tolist()))
+        return features.raw @ features.raw.T
+
+    result = compare(samples, features, {"learned": np.zeros((108, 108), dtype=np.float32)}, learned={"learned": learn})
+    assert (result["learned"]["unique_photos"], len(references), {len(rows) for rows in references}) == (
+        72,
+        15,
+        {57, 58},
     )

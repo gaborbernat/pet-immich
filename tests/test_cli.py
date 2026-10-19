@@ -19,6 +19,8 @@ from pet_immich.encoder import export_encoder
 if TYPE_CHECKING:
     from pathlib import Path
 
+    import httpx
+
 
 @pytest.mark.parametrize(
     "arguments",
@@ -237,3 +239,32 @@ def test_cli_learning_curve_preserves_live_model(inference_state: Path, monkeypa
     )
     main()
     assert (inference_state / "approved.joblib").read_bytes() == previous
+
+
+def test_cli_detects_missing_animals(
+    detection_state: tuple[Path, httpx.Client], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    directory, _ = detection_state
+    monkeypatch.setenv("IMMICH_URL", "http://127.0.0.1")
+    monkeypatch.setenv("IMMICH_API_KEY", "synthetic")
+    monkeypatch.setenv("PET_TAGGER_URL", "http://127.0.0.1")
+    monkeypatch.setattr("sys.argv", ["pet-immich", "detect", "--state", str(directory)])
+    main()
+    assert len(load_samples(directory / "samples.json")) == 51
+
+
+@pytest.mark.parametrize("matching_state", [2], indirect=True)
+@pytest.mark.usefixtures("matching_state")
+def test_cli_compares_identity_adaptation(
+    tmp_path: Path,
+    population: tuple[list[Sample], Features],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    samples, features = population
+    save_samples(tmp_path / "samples.json", samples)
+    features.save(tmp_path / "features.npz")
+    monkeypatch.setenv("PET_TAGGER_URL", "http://127.0.0.1")
+    monkeypatch.setattr("sys.argv", ["pet-immich", "adapt", "--state", str(tmp_path), "--steps", "0"])
+    main()
+    report = json.loads((tmp_path / "raw-matcher/comparison.json").read_text())
+    assert (len(report), report["global"]["unique_photos"]) == (14, 72)

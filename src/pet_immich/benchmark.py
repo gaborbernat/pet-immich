@@ -12,6 +12,8 @@ from pet_immich.grouping import propagate
 from pet_immich.model import capture_groups, event_weights, metrics, passes, splits, validate_error_cost
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping
+
     from numpy.typing import NDArray
 
     from pet_immich.data import Matrix, Sample
@@ -25,6 +27,7 @@ def compare(
     *,
     group_duplicates: bool = False,
     error_cost: float = 5,
+    learned: Mapping[str, Callable[[NDArray[np.int64]], Matrix]] | None = None,
 ) -> dict[str, Comparison]:
     """Channels contain frozen pair similarities in feature-ID order, including unavailable pairs as NaN."""
     validate_error_cost(error_cost)
@@ -48,7 +51,19 @@ def compare(
             values = np.stack([channels[name][np.ix_(rows, rows)] for name in composition], axis=-1)
             predicted = np.full(len(rows), "", dtype="U128")
             for training, testing in folds:
-                predicted[testing] = _predict_fold(values, targets, groups, training, testing, error_cost)
+                predicted[testing] = _predict_fold(
+                    values,
+                    targets,
+                    groups,
+                    training,
+                    testing,
+                    error_cost,
+                    {
+                        column: (lambda reference, channel=learned[name]: channel(rows[reference])[np.ix_(rows, rows)])
+                        for column, name in enumerate(composition)
+                        if learned is not None and name in learned
+                    },
+                )
             predicted[~features.valid[rows]] = ""
             variants = {"+".join(composition): predicted}
             if group_duplicates:
@@ -91,6 +106,11 @@ def _summarize(
         "events": len(set(groups)),
         "passed": passes(report, error_cost),
         "error_cost": error_cost,
+        "errors": [
+            {"crop": sample.id, "expected": str(target), "predicted": str(prediction), "event": int(group)}
+            for sample, target, prediction, group in zip(samples, targets, predicted, groups, strict=True)
+            if prediction != target and (prediction or target != UNKNOWN)
+        ],
     }
 
 
@@ -101,11 +121,14 @@ def _predict_fold(
     training: NDArray[np.int64],
     testing: NDArray[np.int64],
     error_cost: float,
+    learned: dict[int, Callable[[NDArray[np.int64]], Matrix]],
 ) -> NDArray[np.str_]:
     votes = []
     for fitting, calibration in splits(targets[training], groups[training], 3):
         reference = training[fitting]
         held = training[calibration]
+        for column, channel in learned.items():
+            values[..., column] = channel(reference)
         model = _PairFusion.fit(values, targets, groups, reference)
         thresholds = _calibrate(model.scores(values[held]), targets[held], groups[held], model.names, error_cost)
         votes.append(_decide(model.scores(values[testing]), model.names, thresholds))
@@ -220,6 +243,16 @@ class Comparison(TypedDict):
     events: int
     passed: bool
     error_cost: float
+    errors: list[PredictionError]
+
+
+class PredictionError(TypedDict):
+    """Retain private crop IDs so failures can be grouped without asking for repeated burst labels."""
+
+    crop: str
+    expected: str
+    predicted: str
+    event: int
 
 
 __all__ = ["Comparison", "compare"]

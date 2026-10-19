@@ -79,9 +79,30 @@ The NPZ input contains `ids` in feature-cache order and one square similarity ma
 NaN. `comparison.json` evaluates channel combinations and error costs on shared capture groups. `--duplicates` also
 measures direct propagation between crops with matching visual features and perceptual hashes.
 
-`pet_immich.matching.match_candidates` supplies DISK/LightGlue scores from a nearest-neighbor shortlist. Independent
-validation requires reference galleries from each training fold; full-collection shortlists support exploratory
-comparisons. Scores from identity-trained matchers likewise require training within each fold.
+For identity-specific local matching:
+
+```sh
+pet-immich adapt --state "$EXPERIMENT_STATE"
+pet-immich adapt --state "$EXPERIMENT_STATE" --foreground
+```
+
+These experiments compare global features, frozen DISK/LightGlue correspondences, and a LightGlue matcher trained on
+confirmed identities. Training uses cross-event positive pairs and visually similar negative identities, with the
+relaxed assignment margin loss described by [WildMatch](https://github.com/turhancan97/WildMatch). The foreground
+variant removes keypoints outside segmentation masks. Each matcher trains within its calibration fold; candidate
+galleries contain training references only. Reports include missed and incorrect crop IDs for grouping failures by
+capture event. Weights, descriptors, and pair scores stay in the state directory and resume after interruption.
+
+To revisit photos without cached crops, put YOLO detection weights in `$EXPERIMENT_STATE/models/detector.pt` and run:
+
+```sh
+pet-immich detect --state "$EXPERIMENT_STATE"
+pet-immich extract --state "$EXPERIMENT_STATE"
+```
+
+Detection combines 640- and 1280-pixel passes, suppresses overlapping boxes, and preserves existing crop geometry.
+Unreadable previews appear in `detection-failures.json` and remain eligible for retry. Use a separate state directory
+when changing detector weights. Review predictions before merging new crops into the scheduled state.
 
 ## Scheduled operation
 
