@@ -6,7 +6,13 @@ description = "Local pet identity recognition for Immich"
 dependencies = ["numpy", "scipy", "scikit-learn", "joblib", "httpx", "pillow", "onnxruntime", "filelock", "torch"]
 
 [project.optional-dependencies]
-vision = ["ultralytics", "ai-edge-litert", "transformers", "onnx"]
+vision = [
+    "ultralytics",
+    "ai-edge-litert",
+    "transformers",
+    "onnx",
+    "torchvision>=0.29.1",
+]
 test = ["pytest", "pytest-cov", "pytest-mock"]
 dev = ["ruff", "ty", "pytest", "pytest-cov", "pytest-mock", "mdformat"]
 
