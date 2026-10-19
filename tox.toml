@@ -1,22 +1,90 @@
-env_list = ["test", "type", "lint"]
+requires = [
+  "tox>=4.64.7",
+  "tox-uv>=1.36.1",
+]
+env_list = [ "3.14", "dev", "fix", "pkg_meta", "type" ]
 
 [env_run_base]
-base_python = ["3.14"]
-set_env = { OPENBLAS_NUM_THREADS = "2", OMP_NUM_THREADS = "2" }
-pass_env = ["UV_*", "PET_TEST_STATE"]
+description = "run the unit tests with pytest under {base_python}"
+default_base_python = [ "3.14" ]
+package = "wheel"
+wheel_build_env = ".pkg"
+dependency_groups = [ "test" ]
+extras = [ "vision" ]
+pass_env = [ "DIFF_AGAINST", "PYTEST_*" ]
+# sysmon cannot record the per-test coverage contexts.
+set_env.COVERAGE_FILE = "{work_dir}/.coverage.{env_name}"
+set_env.COVERAGE_CORE = "ctrace"
+set_env.OPENBLAS_NUM_THREADS = "2"
+set_env.OMP_NUM_THREADS = "2"
+# Prefer matching CPU wheels over PyPI's CUDA builds.
+set_env.UV_INDEX = "https://download.pytorch.org/whl/cpu"
+set_env.UV_EXTRA_INDEX_URL = "https://pypi.org/simple"
+set_env.UV_INDEX_STRATEGY = "unsafe-best-match"
+commands = [
+  [
+    "python",
+    "-m",
+    "pytest",
+    "{tty:--color=yes}",
+    { replace = "posargs", default = [
+      "--cov",
+      "{env_site_packages_dir}{/}pet_immich",
+      "--cov",
+      "{tox_root}{/}tests",
+      "--cov-config=pyproject.toml",
+      "--no-cov-on-fail",
+      "-n",
+      "4",
+      "--dist=worksteal",
+      "--cov-report",
+      "term-missing:skip-covered",
+      "--cov-context=test",
+      "--cov-report",
+      "html:{env_tmp_dir}{/}htmlcov",
+      "--cov-report",
+      "xml:{work_dir}{/}coverage.{env_name}.xml",
+      "--junitxml",
+      "{work_dir}{/}junit.{env_name}.xml",
+      "tests",
+    ], extend = true },
+  ],
+  [
+    "diff-cover",
+    "--compare-branch",
+    "{env:DIFF_AGAINST:origin/main}",
+    "{work_dir}{/}coverage.{env_name}.xml",
+    "--fail-under",
+    "100",
+  ],
+]
 
-[env.test]
-extras = ["test", "vision"]
-commands = [["pytest", "--cov", "--cov-report=term-missing", "{posargs:tests}"]]
+[env_pkg_base]
+default_base_python = [ "3.14" ]
 
 [env.dev]
+description = "generate a development environment"
 package = "editable"
-extras = ["dev", "vision"]
+dependency_groups = [ "dev" ]
+commands = [ [ "uv", "pip", "tree" ], [ "python", "-c", "import sys; print(sys.executable)" ] ]
+
+[env.fix]
+description = "run formatters and static checks through prek"
+skip_install = true
+dependency_groups = [ "lint" ]
+commands = [ [ "prek", "run", "--all-files", "--show-diff-on-failure" ] ]
+
+[env.pkg_meta]
+description = "validate source and wheel distributions"
+skip_install = true
+dependency_groups = [ "pkg-meta" ]
+commands = [
+  [ "uv", "build", "--sdist", "--wheel", "--out-dir", "{env_tmp_dir}", "." ],
+  [ "twine", "check", "{env_tmp_dir}{/}*" ],
+  [ "check-wheel-contents", "--no-config", "{env_tmp_dir}" ]
+]
 
 [env.type]
-extras = ["dev", "vision"]
-commands = [["ty", "check", "src", "tests", "--python", "{env_python}", "--error-on-warning"]]
-
-[env.lint]
-extras = ["dev"]
-commands = [["ruff", "format", "--check", "."], ["ruff", "check", "."]]
+description = "run strict type checks through prek in the installed environment"
+dependency_groups = [ "lint", "type" ]
+commands = [ [ "prek", "run", "ty", "--all-files", "--hook-stage", "manual", "--show-diff-on-failure" ] ]

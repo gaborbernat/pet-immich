@@ -1,23 +1,39 @@
-name: Test
-on: [push, pull_request]
+name: check
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "0 8 * * *"
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
   test:
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
+        env: ["3.14", fix, type, pkg_meta, dev]
     runs-on: ${{ matrix.os }}
-    env:
-      OPENBLAS_NUM_THREADS: "2"
-      OMP_NUM_THREADS: "2"
     steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: astral-sh/setup-uv@v10.3.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          python-version: '3.14'
-      - run: uv sync --locked --extra dev --extra vision --extra test
-      - run: uv run pytest --cov --cov-report=term-missing
-      - run: uv run ruff format --check .
-      - run: uv run ruff check .
-      - run: uv run ty check src tests --error-on-warning
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          python-version: "3.14"
+          enable-cache: false
+      - name: Install tox
+        run: uv tool install --python-preference only-managed --python 3.14 tox --with tox-uv
+      - name: Setup environment
+        run: tox run -vv --notest --skip-missing-interpreters false -e ${{ matrix.env }}
+      - name: Run checks
+        run: tox run --skip-pkg-install -e ${{ matrix.env }}
+        env:
+          PYTEST_ADDOPTS: "-vv --durations=20"
+          DIFF_AGAINST: ${{ github.event.pull_request.base.sha || 'HEAD' }}

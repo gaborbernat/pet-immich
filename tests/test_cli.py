@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import onnxruntime as ort
 import pytest
+from torch.jit import TracerWarning
 from transformers import BertConfig, BertModel, BitImageProcessor, Dinov2Config, Dinov2Model
 
 from pet_immich.cli import main
@@ -145,7 +146,12 @@ def test_cli_exports_compatible_encoder(encoder_source: Path, tmp_path: Path, mo
             str(encoder_source),
         ],
     )
-    main()
+    # The legacy exporter traces fixed spatial dimensions; the batch dimension stays dynamic.
+    with pytest.warns(
+        (DeprecationWarning, TracerWarning),
+        match="legacy TorchScript-based ONNX export|feature will be removed|Converting a tensor to a Python boolean",
+    ):
+        main()
     session = ort.InferenceSession(str(tmp_path / "models" / "encoder.onnx"))
     result = session.run(None, {"input": np.zeros((2, 3, 224, 224), dtype=np.float32)})
     assert isinstance(result[0], np.ndarray)

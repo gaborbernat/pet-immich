@@ -1,81 +1,108 @@
+[build-system]
+build-backend = "hatchling.build"
+requires = [ "hatchling>=1.32.4" ]
+
 [project]
 name = "pet-immich"
 version = "0.1.0"
-requires-python = ">=3.14"
 description = "Local pet identity recognition for Immich"
+readme = "README.md"
+requires-python = ">=3.14"
+classifiers = [
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.14",
+]
 dependencies = [
-    "numpy>=2.5.4",
-    "scipy>=1.18.1",
-    "scikit-learn>=1.9.1",
-    "joblib>=1.6.0",
-    "httpx>=0.28.1",
-    "pillow>=13.0.0",
-    "onnxruntime>=1.31.0",
-    "filelock>=4.2.4",
-    "torch>=2.14.1",
+  "filelock>=4.2.4",     # Prevent overlapping sync jobs from writing state.
+  "httpx>=0.28.1",       # Immich and crop-provider API requests.
+  "joblib>=1.6",         # Save and load fitted classifiers.
+  "numpy>=2.5.4",        # Embedding arrays and vector normalization.
+  "onnxruntime>=1.31",   # Run the animal embedding encoder on CPU.
+  "pillow>=13",          # Decode, crop, and resize photos.
+  "scikit-learn>=1.9.1", # Identity classifiers, grouped validation, and calibration.
+  "scipy>=1.18.1",       # Capture-event clustering and precision confidence bounds.
+  "torch>=2.14.1",       # Train the identity projection and export encoders.
 ]
-
-[project.optional-dependencies]
-vision = [
-    "ultralytics>=8.4.182",
-    "ai-edge-litert>=2.3.0",
-    "transformers>=5.20.2",
-    "onnx>=1.23.2",
-    "torchvision>=0.29.1",
+optional-dependencies.vision = [
+  "ai-edge-litert>=2.3",  # Run the dog-face landmark localizer.
+  "onnx>=1.23.2",         # Validate and trim exported encoder graphs.
+  "torchvision>=0.29.1",  # Image operations required by segmentation and encoder models.
+  "transformers>=5.20.2", # Load DINOv2 encoders for ONNX export.
+  "ultralytics>=8.4.182", # Segment animals from photo backgrounds.
 ]
-test = ["pytest>=9.1.1", "pytest-cov>=7.1.0", "pytest-mock>=3.17.0"]
-dev = ["ruff>=0.17.1", "ty>=0.0.89", "pytest>=9.1.1", "pytest-cov>=7.1.0", "pytest-mock>=3.17.0", "mdformat>=1.0.0"]
+scripts.pet-immich = "pet_immich.cli:main"
 
-[project.scripts]
-pet-immich = "pet_immich.cli:main"
-
-[build-system]
-requires = ["hatchling>=1.32.4"]
-build-backend = "hatchling.build"
+[dependency-groups]
+dev = [
+  { include-group = "test" },
+  { include-group = "type" },
+  { include-group = "lint" },
+  { include-group = "pkg-meta" }
+]
+test = [
+  "coverage>=7.16.2",
+  "diff-cover>=10.6",
+  "pytest>=9.1.1",
+  "pytest-cov>=7.1",
+  "pytest-mock>=3.17",
+  "pytest-randomly>=5",
+  "pytest-xdist>=3.8",
+]
+type = [ "ty>=0.0.89", { include-group = "test" } ]
+lint = [ "prek>=0.5.6" ]
+pkg-meta = [ "check-wheel-contents>=0.6.3", "twine>=7", "uv>=0.13.1" ]
 
 [tool.ruff]
-line-length = 120
 target-version = "py314"
-
-[tool.ruff.lint]
-select = ["ALL"]
-preview = true
-ignore = [
-    "DOC", # Docstrings explain constraints without repeating signatures.
-    "CPY", # This project does not require copyright notices.
-    "incorrect-blank-line-before-class", # Use D211's class spacing.
-    "multi-line-summary-second-line", # Use D212's summary placement.
-    "missing-trailing-comma", # The formatter controls trailing commas.
-    "single-line-implicit-string-concatenation", # The formatter controls string layout.
+line-length = 120
+format.preview = true
+format.docstring-code-format = true
+lint.select = [ "ALL" ]
+lint.ignore = [
+  "CPY",                                       # This project does not require copyright notices.
+  "DOC",                                       # Docstrings explain constraints without repeating signatures.
+  "incorrect-blank-line-before-class",         # Use D211's class spacing.
+  "missing-trailing-comma",                    # The formatter controls trailing commas.
+  "multi-line-summary-second-line",            # Use D212's summary placement.
+  "single-line-implicit-string-concatenation", # The formatter controls string layout.
 ]
-[tool.ruff.lint.per-file-ignores]
-"tests/**/*.py" = ["D", "assert", "implicit-namespace-package", "magic-value-comparison"]
-[tool.ruff.lint.pylint]
-max-args = 7
-max-positional-args = 7
-[tool.ruff.format]
-preview = true
-docstring-code-format = true
-[tool.coverage.run]
-branch = true
-source = ["pet_immich", "tests"]
-patch = ["subprocess"]
-[tool.coverage.paths]
-source = ["src/pet_immich", ".tox/*/lib/python*/site-packages/pet_immich", ".tox/*/Lib/site-packages/pet_immich"]
-[tool.coverage.report]
-fail_under = 100
-show_missing = true
-[tool.ty.rules]
-all = "error"
+lint.per-file-ignores."tests/**/*.py" = [ "assert", "D", "implicit-namespace-package", "magic-value-comparison" ]
+lint.pylint.max-args = 7
+lint.pylint.max-positional-args = 7
+lint.preview = true
 
-[tool.pytest.ini_options]
-testpaths = ["tests"]
+[tool.codespell]
+builtin = "clear,usage,en-GB_to_en-US"
+write-changes = true
+count = true
 
-[tool.uv.sources]
-torch = { index = "pytorch-cpu" }
-torchvision = { index = "pytorch-cpu" }
+[tool.pyproject-fmt]
+max_supported_python = "3.14"
 
-[[tool.uv.index]]
-name = "pytorch-cpu"
-url = "https://download.pytorch.org/whl/cpu"
-explicit = true
+[tool.ty]
+rules.all = "error"
+
+[tool.pytest]
+ini_options.testpaths = [ "tests" ]
+ini_options.filterwarnings = [ "error" ]
+
+[tool.coverage]
+run.source = [ "pet_immich", "tests" ]
+run.branch = true
+run.patch = [ "subprocess" ]
+paths.source = [
+  "src/pet_immich",
+  ".tox/*/lib/python*/site-packages/pet_immich",
+  ".tox/*/Lib/site-packages/pet_immich"
+]
+report.fail_under = 100
+report.show_missing = true
+
+[tool.importlinter]
+root_package = "pet_immich"
+
+[[tool.importlinter.contracts]]
+name = "a layer imports only the layers below it"
+type = "layers"
+containers = [ "pet_immich" ]
+layers = [ "cli", "runtime", "model | importer | encoder", "extract | metric", "data" ]
