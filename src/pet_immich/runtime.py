@@ -85,8 +85,9 @@ def discover(directory: Path, client: httpx.Client, tagger_url: str) -> None:
                     for index, box in enumerate(detection.json()["crops"])
                 )
                 seen.add(asset["id"])
-                save_samples(directory / "samples.json", samples)
-                private_write(seen_path, json.dumps(sorted(seen)).encode())
+            save_samples(directory / "samples.json", samples)
+            private_write(seen_path, json.dumps(sorted(seen)).encode())
+            print(f"Discovery page {page}: {len(seen)} scanned assets, {len(samples)} cached crops", flush=True)
             if not assets.get("nextPage"):
                 return
             page = int(assets["nextPage"])
