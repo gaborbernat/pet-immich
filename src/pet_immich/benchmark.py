@@ -129,9 +129,9 @@ def _predict_fold(
         held = training[calibration]
         for column, channel in learned.items():
             values[..., column] = channel(reference)
-        model = _PairFusion.fit(values, targets, groups, reference)
-        thresholds = _calibrate(model.scores(values[held]), targets[held], groups[held], model.names, error_cost)
-        votes.append(_decide(model.scores(values[testing]), model.names, thresholds))
+        model = PairFusion.fit(values, targets, groups, reference)
+        thresholds = calibrate(model.scores(values[held]), targets[held], groups[held], model.names, error_cost)
+        votes.append(decide(model.scores(values[testing]), model.names, thresholds))
     result = np.full(len(testing), "", dtype="U128")
     stacked = np.asarray(votes)
     minimum_votes: Final = 2
@@ -143,7 +143,7 @@ def _predict_fold(
 
 
 @dataclass
-class _PairFusion:
+class PairFusion:
     """Learn channel weights from cross-event pairs; unknown animals supply negatives only."""
 
     classifier: LogisticRegression
@@ -155,7 +155,8 @@ class _PairFusion:
     @classmethod
     def fit(
         cls, values: Matrix, targets: NDArray[np.str_], groups: NDArray[np.int32], reference: NDArray[np.int64]
-    ) -> _PairFusion:
+    ) -> PairFusion:
+        """Balance capture events so repeated frames cannot dominate channel weights."""
         first, second = np.where(np.triu(groups[reference, None] != groups[None, reference], 1))
         same = (targets[reference[first]] == targets[reference[second]]) & (targets[reference[first]] != UNKNOWN)
         pairs = values[reference[first], reference[second]]
@@ -172,6 +173,7 @@ class _PairFusion:
         )
 
     def scores(self, values: Matrix) -> Matrix:
+        """Require support across reference events rather than repeated frames."""
         pairs = values[:, self.reference]
         scores = self.classifier.predict_proba(_pair_inputs(pairs.reshape(-1, pairs.shape[-1])))[:, 1].reshape(
             pairs.shape[:2]
@@ -195,7 +197,7 @@ def _pair_inputs(values: Matrix) -> Matrix:
     return np.concatenate((np.nan_to_num(values, nan=0, posinf=0, neginf=0), np.isfinite(values)), axis=1)
 
 
-def _calibrate(
+def calibrate(
     scores: Matrix, targets: NDArray[np.str_], groups: NDArray[np.int32], names: list[str], error_cost: float
 ) -> dict[str, tuple[float, float]]:
     """Choose acceptance and runner-up margin using calibration events only."""
@@ -221,7 +223,8 @@ def _calibrate(
     return thresholds
 
 
-def _decide(scores: Matrix, names: list[str], thresholds: dict[str, tuple[float, float]]) -> NDArray[np.str_]:
+def decide(scores: Matrix, names: list[str], thresholds: dict[str, tuple[float, float]]) -> NDArray[np.str_]:
+    """Reject weak winners and close runner-up identities."""
     winners = np.asarray(names)[scores.argmax(axis=1)]
     confidence = scores.max(axis=1)
     margins = np.diff(np.sort(scores, axis=1)[:, -2:], axis=1).ravel()
@@ -255,4 +258,4 @@ class PredictionError(TypedDict):
     event: int
 
 
-__all__ = ["Comparison", "compare"]
+__all__ = ["Comparison", "PairFusion", "calibrate", "compare", "decide"]

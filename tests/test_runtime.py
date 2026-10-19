@@ -1,5 +1,6 @@
 import hashlib
 import json
+import shutil
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
@@ -9,6 +10,7 @@ import numpy as np
 import pytest
 
 from pet_immich.data import Features, Sample, digest, load_samples, save_samples
+from pet_immich.fusion import train_fusion
 from pet_immich.runtime import Assignment, Face, apply_assignments, discover, face_action, run
 
 if TYPE_CHECKING:
@@ -127,8 +129,9 @@ def test_discovery_handles_old_photos_uploaded_later(tmp_path: Path, mocker: Moc
     assert [sample.asset_id for sample in load_samples(tmp_path / "samples.json")] == ["asset-1", "asset-2"]
 
 
+@pytest.mark.parametrize("fusion", [False, True], ids=["single-encoder", "fusion"])
 def test_plan_preserves_confirmed_labels(
-    inference_state: Path, mocker: MockerFixture, monkeypatch: pytest.MonkeyPatch
+    inference_state: Path, mocker: MockerFixture, monkeypatch: pytest.MonkeyPatch, *, fusion: bool
 ) -> None:
     def respond(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json=[])
@@ -140,6 +143,12 @@ def test_plan_preserves_confirmed_labels(
         return_value=httpx.Client(base_url="http://127.0.0.1", transport=httpx.MockTransport(respond)),
     )
     samples = load_samples(inference_state / "samples.json")
+    if fusion:
+        features = Features.load(inference_state / "features.npz")
+        model, _ = train_fusion(samples, features, features)
+        joblib.dump(model, inference_state / "approved.joblib")
+        (inference_state / "large").mkdir()
+        features.save(inference_state / "large" / "features.npz")
     samples[0] = replace(samples[0], label="pet-b")
     save_samples(inference_state / "samples.json", samples)
     run(inference_state, apply=False, sync=False)
@@ -178,11 +187,16 @@ def test_runtime_refuses_incompatible_state(
 
 
 @pytest.mark.usefixtures("extraction_state")
+@pytest.mark.parametrize("fusion", [False, True], ids=["single-encoder", "fusion"])
+@pytest.mark.parametrize("secondary", [False, True], ids=["primary-detector", "second-detector"])
 def test_runtime_sync_uses_cache_and_applies_new_assignments(
     inference_state: Path,
     client_type: type[httpx.Client],
     monkeypatch: pytest.MonkeyPatch,
     mocker: MockerFixture,
+    *,
+    fusion: bool,
+    secondary: bool,
 ) -> None:
     signature = hashlib.sha256(
         (
@@ -192,12 +206,20 @@ def test_runtime_sync_uses_cache_and_applies_new_assignments(
             )
         ).encode()
     ).hexdigest()
+    if secondary:
+        (inference_state / "models" / "detector.pt").write_bytes(b"synthetic-secondary")
     features = Features.load(inference_state / "features.npz")
     features.signature = signature
     for field in (features.raw, features.body, features.face):
         field[:] = np.repeat(np.eye(3, dtype=np.float32), 36, axis=0)
     features.save(inference_state / "features.npz")
-    model = joblib.load(inference_state / "approved.joblib")
+    if fusion:
+        model, _ = train_fusion(load_samples(inference_state / "samples.json"), features, features)
+        (inference_state / "large").mkdir()
+        shutil.copytree(inference_state / "models", inference_state / "large" / "models")
+        features.save(inference_state / "large" / "features.npz")
+    else:
+        model = joblib.load(inference_state / "approved.joblib")
     model.signature = signature
     joblib.dump(model, inference_state / "approved.joblib")
     faces: dict[str, list[Face]] = {}
@@ -231,4 +253,7 @@ def test_runtime_sync_uses_cache_and_applies_new_assignments(
         side_effect=lambda *args, **kwargs: original(*args, **kwargs, transport=httpx.MockTransport(respond)),
     )
     run(inference_state, apply=True, sync=True)
-    assert len(json.loads((inference_state / "applied.json").read_text())) == 72
+    assert (
+        len(json.loads((inference_state / "applied.json").read_text())),
+        (inference_state / "detection.json").exists(),
+    ) == (72, secondary)

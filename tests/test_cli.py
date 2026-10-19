@@ -268,3 +268,11 @@ def test_cli_compares_identity_adaptation(
     main()
     report = json.loads((tmp_path / "raw-matcher/comparison.json").read_text())
     assert (len(report), report["global"]["unique_photos"]) == (14, 72)
+
+
+def test_cli_trains_fusion(inference_state: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (inference_state / "large").mkdir()
+    Features.load(inference_state / "features.npz").save(inference_state / "large" / "features.npz")
+    monkeypatch.setattr("sys.argv", ["pet-immich", "train-fusion", "--state", str(inference_state)])
+    main()
+    assert json.loads((inference_state / "validation.json").read_text())["unique_photos"] == 72

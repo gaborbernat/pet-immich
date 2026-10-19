@@ -113,6 +113,7 @@ class AdaptedMatches:
             descriptors = [
                 self.matcher.describe(sample, self.directory, client, self.tagger_url) for sample in self.samples
             ]
+        torch.set_num_threads(2)
         self.matcher.matcher.load_state_dict(self.initial)
         weights = self.directory / f"{key}.pt"
         if weights.exists():

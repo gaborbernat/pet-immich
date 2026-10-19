@@ -17,6 +17,7 @@ from pet_immich.data import Features, load_samples, private_write, save_samples
 from pet_immich.detect import scan_missing
 from pet_immich.encoder import export_encoder
 from pet_immich.extract import extract
+from pet_immich.fusion import train_fusion
 from pet_immich.importer import import_legacy
 from pet_immich.model import train
 from pet_immich.network import local_request
@@ -28,7 +29,19 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "command",
-        choices=["import", "extract", "train", "compare", "plan", "apply", "sync", "export-encoder", "detect", "adapt"],
+        choices=[
+            "import",
+            "extract",
+            "train",
+            "compare",
+            "plan",
+            "apply",
+            "sync",
+            "export-encoder",
+            "detect",
+            "adapt",
+            "train-fusion",
+        ],
     )
     parser.add_argument("--state", type=Path, required=True)
     parser.add_argument("--database", type=Path)
@@ -65,8 +78,8 @@ def main() -> None:
         _extract(args)
     elif args.command == "compare":
         _compare(args)
-    elif args.command == "train":
-        _train(args.state, args.error_cost, args.training_fraction)
+    elif args.command in {"train", "train-fusion"}:
+        _train(args.state, args.error_cost, args.training_fraction, fusion=args.command == "train-fusion")
     else:
         run(args.state, apply=args.command in {"apply", "sync", "export-encoder"}, sync=args.command == "sync")
 
@@ -94,15 +107,16 @@ def _detect(args: argparse.Namespace) -> None:
         scan_missing(directory, client, os.environ["PET_TAGGER_URL"], directory / "models" / "detector.pt")
 
 
-def _train(directory: Path, error_costs: list[float], training_fraction: float) -> None:
+def _train(directory: Path, error_costs: list[float], training_fraction: float, *, fusion: bool) -> None:
     if len(error_costs) != 1:
         msg = "train requires exactly one error cost"
         raise ValueError(msg)
-    model, report = train(
-        load_samples(directory / "samples.json"),
-        Features.load(directory / "features.npz"),
-        error_cost=error_costs[0],
-        training_fraction=training_fraction,
+    samples = load_samples(directory / "samples.json")
+    features = Features.load(directory / "features.npz")
+    model, report = (
+        train_fusion(samples, features, Features.load(directory / "large" / "features.npz"), error_cost=error_costs[0])
+        if fusion
+        else train(samples, features, error_cost=error_costs[0], training_fraction=training_fraction)
     )
     stream = io.BytesIO()
     joblib.dump(model, stream)

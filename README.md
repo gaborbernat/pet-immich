@@ -93,6 +93,11 @@ variant removes keypoints outside segmentation masks. Each matcher trains within
 galleries contain training references only. Reports include missed and incorrect crop IDs for grouping failures by
 capture event. Weights, descriptors, and pair scores stay in the state directory and resume after interruption.
 
+`train-fusion --state "$PET_STATE" --error-cost 2` evaluates and trains the fixed face-plus-large-encoder composition.
+Place the large encoder's models and feature cache under `$PET_STATE/large/`, using the same crop IDs as the primary
+cache. The resulting approved model works with `plan`, `apply`, and `sync`; scheduled extraction updates both encoders.
+Its validation report includes direct duplicate propagation.
+
 To revisit photos without cached crops, put YOLO detection weights in `$EXPERIMENT_STATE/models/detector.pt` and run:
 
 ```sh
@@ -102,7 +107,8 @@ pet-immich extract --state "$EXPERIMENT_STATE"
 
 Detection combines 640- and 1280-pixel passes, suppresses overlapping boxes, and preserves existing crop geometry.
 Unreadable previews appear in `detection-failures.json` and remain eligible for retry. Use a separate state directory
-when changing detector weights. Review predictions before merging new crops into the scheduled state.
+when changing detector weights. Review predictions before merging new crops into the scheduled state. When detection
+weights are present in the scheduled state, `sync` also runs the secondary detector before feature extraction.
 
 ## Scheduled operation
 

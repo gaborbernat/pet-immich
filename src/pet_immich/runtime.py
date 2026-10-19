@@ -14,11 +14,16 @@ import joblib
 from filelock import FileLock
 
 from pet_immich.data import UNCERTAIN, UNKNOWN, Features, Sample, load_samples, private_write, save_samples
+from pet_immich.detect import scan_missing
 from pet_immich.extract import extract
+from pet_immich.fusion import FusionModel
 from pet_immich.network import local_request
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    import numpy as np
+    from numpy.typing import NDArray
 
     from pet_immich.model import IdentityModel
 
@@ -27,7 +32,7 @@ def run(directory: Path, *, apply: bool, sync: bool) -> None:
     """Require approval and matching feature provenance before planning any writes."""
     with FileLock(directory / "run.lock", timeout=0):
         artifact = (directory / "approved.joblib").read_bytes()
-        model = cast("IdentityModel", joblib.load(io.BytesIO(artifact)))
+        model = cast("IdentityModel | FusionModel", joblib.load(io.BytesIO(artifact)))
         if not model.approved:
             msg = "Model has not passed validation"
             raise ValueError(msg)
@@ -48,6 +53,8 @@ def run(directory: Path, *, apply: bool, sync: bool) -> None:
                     headers={"x-api-key": os.environ.get("IMMICH_READ_API_KEY", os.environ["IMMICH_API_KEY"])},
                 ) as reader:
                     discover(directory, reader, os.environ["PET_TAGGER_URL"])
+                    if (weights := directory / "models" / "detector.pt").exists():
+                        scan_missing(directory, reader, os.environ["PET_TAGGER_URL"], weights)
                 extract(load_samples(directory / "samples.json"), directory, os.environ["PET_TAGGER_URL"])
             samples = load_samples(directory / "samples.json")
             features = Features.load(directory / "features.npz")
@@ -55,7 +62,7 @@ def run(directory: Path, *, apply: bool, sync: bool) -> None:
                 msg = "Feature extractor differs from the validated model"
                 raise ValueError(msg)
             rows = {key: index for index, key in enumerate(features.ids)}
-            predictions = model.predict(features.matrix(model.mode))
+            predictions = _predict(model, samples, features, directory, sync=sync)
             planned = []
             for sample in samples:
                 if sample.id not in rows or sample.label in {UNCERTAIN, UNKNOWN}:
@@ -73,6 +80,16 @@ def run(directory: Path, *, apply: bool, sync: bool) -> None:
             sys.stdout.write(json.dumps(dict(Counter(item.action for item in planned))) + "\n")
             if apply:
                 apply_assignments(client, planned, directory, hashlib.sha256(artifact).hexdigest())
+
+
+def _predict(
+    model: IdentityModel | FusionModel, samples: list[Sample], features: Features, directory: Path, *, sync: bool
+) -> NDArray[np.str_]:
+    if isinstance(model, FusionModel):
+        if sync:
+            extract(samples, directory / "large", os.environ["PET_TAGGER_URL"])
+        return model.predict(samples, features, Features.load(directory / "large" / "features.npz"))
+    return model.predict(features.matrix(model.mode))
 
 
 def discover(directory: Path, client: httpx.Client, tagger_url: str) -> None:

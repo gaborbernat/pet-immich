@@ -111,7 +111,9 @@ containers = [ "pet_immich" ]
 layers = [
   "cli",
   "adaptation",
-  "runtime | benchmark",
+  "runtime",
+  "fusion",
+  "benchmark",
   "model | importer | encoder",
   "extract | metric | grouping | matching | detect",
   "miewid",
