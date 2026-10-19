@@ -9,7 +9,7 @@ from sklearn.linear_model import LogisticRegression
 
 from pet_immich.data import UNCERTAIN, UNKNOWN, Features
 from pet_immich.grouping import propagate
-from pet_immich.model import capture_groups, event_weights, metrics, passes, splits
+from pet_immich.model import capture_groups, event_weights, metrics, passes, splits, validate_error_cost
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -19,9 +19,15 @@ if TYPE_CHECKING:
 
 
 def compare(
-    samples: list[Sample], features: Features, channels: dict[str, Matrix], *, group_duplicates: bool = False
+    samples: list[Sample],
+    features: Features,
+    channels: dict[str, Matrix],
+    *,
+    group_duplicates: bool = False,
+    error_cost: float = 5,
 ) -> dict[str, Comparison]:
     """Channels contain frozen pair similarities in feature-ID order, including unavailable pairs as NaN."""
+    validate_error_cost(error_cost)
     size = len(features.ids)
     if not channels or any(values.shape != (size, size) for values in channels.values()):
         msg = "Every similarity channel must be square and aligned with feature IDs"
@@ -42,7 +48,7 @@ def compare(
             values = np.stack([channels[name][np.ix_(rows, rows)] for name in composition], axis=-1)
             predicted = np.full(len(rows), "", dtype="U128")
             for training, testing in folds:
-                predicted[testing] = _predict_fold(values, targets, groups, training, testing)
+                predicted[testing] = _predict_fold(values, targets, groups, training, testing, error_cost)
             predicted[~features.valid[rows]] = ""
             variants = {"+".join(composition): predicted}
             if group_duplicates:
@@ -59,7 +65,9 @@ def compare(
                     [replace(sample, label=None) for sample in labeled], subset, predicted
                 )
             for name, predictions in variants.items():
-                results[name] = _summarize(labeled, targets, groups, names, predictions, features.valid[rows])
+                results[name] = _summarize(
+                    labeled, targets, groups, names, predictions, features.valid[rows], error_cost
+                )
     return results
 
 
@@ -70,6 +78,7 @@ def _summarize(
     names: list[str],
     predicted: NDArray[np.str_],
     valid: NDArray[np.bool_],
+    error_cost: float,
 ) -> Comparison:
     report = metrics(targets, predicted, groups, names)
     return {
@@ -80,7 +89,8 @@ def _summarize(
         "ineligible_crops": int(np.sum(~valid)),
         "samples": len(samples),
         "events": len(set(groups)),
-        "passed": passes(report),
+        "passed": passes(report, error_cost),
+        "error_cost": error_cost,
     }
 
 
@@ -90,13 +100,14 @@ def _predict_fold(
     groups: NDArray[np.int32],
     training: NDArray[np.int64],
     testing: NDArray[np.int64],
+    error_cost: float,
 ) -> NDArray[np.str_]:
     votes = []
     for fitting, calibration in splits(targets[training], groups[training], 3):
         reference = training[fitting]
         held = training[calibration]
         model = _PairFusion.fit(values, targets, groups, reference)
-        thresholds = _calibrate(model.scores(values[held]), targets[held], groups[held], model.names)
+        thresholds = _calibrate(model.scores(values[held]), targets[held], groups[held], model.names, error_cost)
         votes.append(_decide(model.scores(values[testing]), model.names, thresholds))
     result = np.full(len(testing), "", dtype="U128")
     stacked = np.asarray(votes)
@@ -162,7 +173,7 @@ def _pair_inputs(values: Matrix) -> Matrix:
 
 
 def _calibrate(
-    scores: Matrix, targets: NDArray[np.str_], groups: NDArray[np.int32], names: list[str]
+    scores: Matrix, targets: NDArray[np.str_], groups: NDArray[np.int32], names: list[str], error_cost: float
 ) -> dict[str, tuple[float, float]]:
     """Choose acceptance and runner-up margin using calibration events only."""
     winners = np.asarray(names)[scores.argmax(axis=1)]
@@ -179,9 +190,7 @@ def _calibrate(
             if len(set(groups[accepted])) < minimum_events:
                 continue
             correct = targets[accepted] == name
-            if not correct.all():
-                continue
-            coverage = float(weights[accepted & (targets == name)].sum())
+            coverage = float(np.sum(weights[accepted] * np.where(correct, 1, -error_cost)))
             if coverage > best:
                 best = coverage
                 threshold = (float(cutoff), margin)
@@ -210,6 +219,7 @@ class Comparison(TypedDict):
     samples: int
     events: int
     passed: bool
+    error_cost: float
 
 
 __all__ = ["Comparison", "compare"]

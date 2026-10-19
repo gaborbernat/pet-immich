@@ -42,6 +42,7 @@ def test_comparison_counts_ineligible_crops_in_recall(population: tuple[list[Sam
 
 def test_comparison_counts_photos_once(population: tuple[list[Sample], Features]) -> None:
     samples, features = population
+    features.raw = np.repeat(np.eye(3, dtype=np.float32), 36, axis=0)
     samples = [replace(sample, asset_id=f"photo-{index // 2}") for index, sample in enumerate(samples)]
     result = compare(samples, features, {"encoder": features.raw @ features.raw.T})["encoder"]
     assert result["unique_photos"] == 36
@@ -67,3 +68,21 @@ def test_comparison_requires_unknown_and_two_identities(
             features,
             {"encoder": features.raw @ features.raw.T},
         )
+
+
+@pytest.mark.parametrize(
+    ("cost", "correct", "incorrect"), [(1, 26, 6), (20, 20, 1)], ids=["more-recovery", "fewer-errors"]
+)
+def test_comparison_exposes_recovery_error_tradeoff(
+    population: tuple[list[Sample], Features],
+    cost: float,
+    correct: int,
+    incorrect: int,
+) -> None:
+    samples, features = population
+    samples = [replace(sample, label="pet-b") if index < 6 else sample for index, sample in enumerate(samples)]
+    result = compare(samples, features, {"encoder": features.raw @ features.raw.T}, error_cost=cost)["encoder"]
+    assert (result["identities"]["pet-a"]["correct"], result["identities"]["pet-a"]["incorrect"]) == (
+        correct,
+        incorrect,
+    )

@@ -34,6 +34,7 @@ def main() -> None:
     parser.add_argument("--refresh", action="store_true")
     parser.add_argument("--similarities", type=Path)
     parser.add_argument("--duplicates", action="store_true")
+    parser.add_argument("--error-cost", type=float, nargs="+", default=[5.0])
     args = parser.parse_args()
     os.umask(0o077)
     args.state.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -58,13 +59,18 @@ def main() -> None:
     elif args.command == "compare":
         _compare(args)
     elif args.command == "train":
-        _train(args.state)
+        _train(args.state, args.error_cost)
     else:
         run(args.state, apply=args.command in {"apply", "sync", "export-encoder"}, sync=args.command == "sync")
 
 
-def _train(directory: Path) -> None:
-    model, report = train(load_samples(directory / "samples.json"), Features.load(directory / "features.npz"))
+def _train(directory: Path, error_costs: list[float]) -> None:
+    if len(error_costs) != 1:
+        msg = "train requires exactly one error cost"
+        raise ValueError(msg)
+    model, report = train(
+        load_samples(directory / "samples.json"), Features.load(directory / "features.npz"), error_cost=error_costs[0]
+    )
     stream = io.BytesIO()
     joblib.dump(model, stream)
     private_write(directory / "candidate.joblib", stream.getvalue())
@@ -83,12 +89,17 @@ def _compare(args: argparse.Namespace) -> None:
         if archive["ids"].tolist() != features.ids:
             msg = "Similarity IDs must match the feature cache in order"
             raise ValueError(msg)
-        comparison = compare(
-            load_samples(args.state / "samples.json"),
-            features,
-            {name: archive[name] for name in archive.files if name != "ids"},
-            group_duplicates=args.duplicates,
-        )
+        comparison = {
+            f"{name}@cost={cost:g}": report
+            for cost in args.error_cost
+            for name, report in compare(
+                load_samples(args.state / "samples.json"),
+                features,
+                {name: archive[name] for name in archive.files if name != "ids"},
+                group_duplicates=args.duplicates,
+                error_cost=cost,
+            ).items()
+        }
     private_write(args.state / "comparison.json", json.dumps(comparison, indent=2).encode())
     sys.stdout.write(json.dumps(comparison, indent=2) + "\n")
 

@@ -93,6 +93,9 @@ def test_metrics_handles_abstention() -> None:
             "pet-a": {
                 "correct": 0,
                 "accepted": 0,
+                "incorrect": 0,
+                "known": 1,
+                "missed": 1,
                 "precision": 0,
                 "recall": 0,
                 "event_precision": 0,
@@ -131,12 +134,21 @@ def test_training_rejects_capture_overlap_that_breaks_inner_folds(population: tu
         train(samples, features)
 
 
-def test_calibration_rejects_confident_predictions_with_contradictory_labels(
+@pytest.mark.parametrize(("cost", "expected"), [(1, "pet-a"), (5, "")], ids=["recover-majority", "reject-ambiguity"])
+def test_calibration_balances_recovery_against_incorrect_assignments(
     population: tuple[list[Sample], Features],
+    cost: float,
+    expected: str,
 ) -> None:
     samples, features = population
     samples = [replace(sample, label="pet-a") if 36 <= index < 60 else sample for index, sample in enumerate(samples)]
     for values in (features.raw, features.body, features.face):
         values[:72] = [1, 0, 0]
-    model, _ = train(samples, features)
-    assert model.predict(np.asarray([[1, 0, 0]], dtype=np.float32)).tolist() == [""]
+    model, _ = train(samples, features, error_cost=cost)
+    assert model.predict(np.asarray([[1, 0, 0]], dtype=np.float32)).tolist() == [expected]
+
+
+@pytest.mark.parametrize("cost", [0, -1, float("nan"), float("inf")], ids=["zero", "negative", "nan", "infinite"])
+def test_training_rejects_invalid_error_cost(population: tuple[list[Sample], Features], cost: float) -> None:
+    with pytest.raises(ValueError, match="Error cost"):
+        train(*population, error_cost=cost)

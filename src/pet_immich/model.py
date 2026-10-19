@@ -26,8 +26,9 @@ _MINIMUM_SIMILARITY: Final = 0.4
 _MINIMUM_GROUPS: Final = 5
 
 
-def train(samples: list[Sample], features: Features) -> tuple[IdentityModel, _Report]:
+def train(samples: list[Sample], features: Features, *, error_cost: float = 5) -> tuple[IdentityModel, _Report]:
     """Select thresholds inside each fold so outer observations remain evaluation data."""
+    validate_error_cost(error_cost)
     indices = {value: index for index, value in enumerate(features.ids)}
     labeled = [sample for sample in samples if sample.label not in {None, UNCERTAIN} and sample.id in indices]
     rows = np.asarray([indices[sample.id] for sample in labeled], dtype=np.int64)
@@ -49,7 +50,10 @@ def train(samples: list[Sample], features: Features) -> tuple[IdentityModel, _Re
     decisions: list[_Fold] = []
     for fold, (training, testing) in enumerate(splits(targets, groups, 5)):
         candidate, selection = select_model(
-            {name: values[training] for name, values in matrices.items()}, targets[training], groups[training]
+            {name: values[training] for name, values in matrices.items()},
+            targets[training],
+            groups[training],
+            error_cost,
         )
         predicted[testing] = np.where(
             features.valid[rows[testing]], candidate.predict(matrices[candidate.mode][testing]), ""
@@ -61,22 +65,27 @@ def train(samples: list[Sample], features: Features) -> tuple[IdentityModel, _Re
     report["groups"] = len(set(groups))
     report["class_counts"] = dict(Counter(targets.tolist()))
     report["method"] = "nested grouped CV; inner model/threshold selection; outer evaluation only"
-    report["passed"] = passes(report)
-    final, selection = select_model(matrices, targets, groups)
+    report["error_cost"] = error_cost
+    report["passed"] = passes(report, error_cost)
+    final, selection = select_model(matrices, targets, groups, error_cost)
     final.signature = features.signature
     final.approved = report["passed"]
     report["final_selection"] = selection
     return final, report
 
 
-def passes(report: _Report) -> bool:
-    """Require precision for each identity rather than averaging away a weak class."""
-    minimum_precision: Final = 0.95
+def validate_error_cost(error_cost: float) -> None:
+    """Reject costs that would reward mistakes or make comparisons undefined."""
+    if not np.isfinite(error_cost) or error_cost <= 0:
+        msg = "Error cost must be finite and greater than zero"
+        raise ValueError(msg)
+
+
+def passes(report: _Report, error_cost: float = 5) -> bool:
+    """Require evidence of net benefit for each identity under the selected error cost."""
     minimum_events: Final = 10
     return all(
-        row["precision"] >= minimum_precision
-        and row["event_precision"] >= minimum_precision
-        and row["events"] >= minimum_events
+        row["event_precision"] - error_cost * (1 - row["event_precision"]) > 0 and row["events"] >= minimum_events
         for row in report["identities"].values()
     )
 
@@ -112,7 +121,7 @@ def splits(
 
 
 def select_model(
-    matrices: dict[str, Matrix], targets: NDArray[np.str_], groups: NDArray[np.int32]
+    matrices: dict[str, Matrix], targets: NDArray[np.str_], groups: NDArray[np.int32], error_cost: float
 ) -> tuple[IdentityModel, _Selection]:
     candidates = []
     for mode, values in matrices.items():
@@ -124,37 +133,57 @@ def select_model(
             winners = classifier.classes_[probabilities.argmax(axis=1)]
             confidence = probabilities.max(axis=1)
             similarities = nearest(values[calibration], winners, values[training], targets[training])
-            thresholds = {}
-            for name in classifier.classes_:
-                if name == UNKNOWN:
-                    continue
-                threshold = 1.01
-                for cutoff in np.unique(np.maximum(confidence, 0.7)):
-                    mask = (winners == name) & (confidence >= cutoff) & (similarities >= _MINIMUM_SIMILARITY)
-                    if len(set(groups[calibration][mask])) < _MINIMUM_GROUPS:
-                        continue
-                    if np.all(targets[calibration][mask] == name):
-                        threshold = float(cutoff)
-                        break
-                thresholds[str(name)] = threshold
+            thresholds = _thresholds(
+                winners, confidence, similarities, targets[calibration], groups[calibration], error_cost
+            )
             member = IdentityModel(classifier, mode, thresholds, values[training], targets[training])
             accepted[calibration] = member.predict(values[calibration])
             members.append(member)
         weights = event_weights(groups)
-        coverage = float(
+        utility = float(
             np.mean([
-                np.sum(weights[(accepted == name) & (targets == name)]) / np.sum(weights[targets == name])
+                (
+                    np.sum(weights[(accepted == name) & (targets == name)])
+                    - error_cost * np.sum(weights[(accepted == name) & (targets != name)])
+                )
+                / np.sum(weights[targets == name])
                 for name in np.unique(targets)
                 if name != UNKNOWN
             ])
         )
-        candidates.append((coverage, members))
-    coverage, members = max(candidates, key=operator.itemgetter(0))
+        candidates.append((utility, members))
+    utility, members = max(candidates, key=operator.itemgetter(0))
     first = members[0]
     return (
         IdentityModel(first.classifier, first.mode, {}, first.reference, first.targets, members=members),
-        {"mode": first.mode, "thresholds": [member.thresholds for member in members], "inner_event_coverage": coverage},
+        {"mode": first.mode, "thresholds": [member.thresholds for member in members], "inner_event_utility": utility},
     )
+
+
+def _thresholds(
+    winners: NDArray[np.str_],
+    confidence: Matrix,
+    similarities: Matrix,
+    targets: NDArray[np.str_],
+    groups: NDArray[np.int32],
+    error_cost: float,
+) -> dict[str, float]:
+    weights = event_weights(groups)
+    thresholds = {}
+    for name in np.unique(targets):
+        if name == UNKNOWN:
+            continue
+        threshold = 1.01
+        best = 0.0
+        for cutoff in np.unique(confidence):
+            mask = (winners == name) & (confidence >= cutoff) & (similarities >= _MINIMUM_SIMILARITY)
+            if len(set(groups[mask])) < _MINIMUM_GROUPS:
+                continue
+            if (benefit := float(np.sum(weights[mask] * np.where(targets[mask] == name, 1, -error_cost)))) > best:
+                best = benefit
+                threshold = float(cutoff)
+        thresholds[str(name)] = threshold
+    return thresholds
 
 
 def fit(values: Matrix, targets: NDArray[np.str_], groups: NDArray[np.int32], mode: str) -> CalibratedClassifierCV:
@@ -199,6 +228,9 @@ def metrics(
         identities[name] = {
             "correct": correct,
             "accepted": total,
+            "incorrect": total - correct,
+            "known": int(np.sum(targets == name)),
+            "missed": int(np.sum(targets == name)) - correct,
             "precision": correct / total if total else 0,
             "recall": correct / int(np.sum(targets == name)),
             "event_precision": float(np.average(targets[selected] == name, weights=event_weights(groups[selected])))
@@ -258,6 +290,9 @@ class IdentityMetrics(TypedDict):
 
     correct: int
     accepted: int
+    incorrect: int
+    known: int
+    missed: int
     precision: float
     recall: float
     event_precision: float
@@ -268,7 +303,7 @@ class IdentityMetrics(TypedDict):
 class _Selection(TypedDict):
     mode: str
     thresholds: list[dict[str, float]]
-    inner_event_coverage: float
+    inner_event_utility: float
 
 
 class _Fold(TypedDict):
@@ -287,6 +322,7 @@ class _Report(TypedDict):
     class_counts: NotRequired[dict[str, int]]
     method: NotRequired[str]
     passed: NotRequired[bool]
+    error_cost: NotRequired[float]
     final_selection: NotRequired[_Selection]
 
 
@@ -299,4 +335,5 @@ __all__ = [
     "passes",
     "splits",
     "train",
+    "validate_error_cost",
 ]

@@ -51,7 +51,7 @@ def test_cli_compares_only_aligned_channels(
     )
     if aligned:
         main()
-        assert json.loads((inference_state / "comparison.json").read_text())["raw"]["unique_photos"] == 72
+        assert json.loads((inference_state / "comparison.json").read_text())["raw@cost=5"]["unique_photos"] == 72
     else:
         with pytest.raises(ValueError, match="Similarity IDs"):
             main()
@@ -121,7 +121,7 @@ def test_cli_extracts_only_labeled_crops(
             Sample("unlabeled", "two", (0, 0, 1, 1)),
         ],
     )
-    monkeypatch.setenv("PET_TAGGER_URL", "http://test")
+    monkeypatch.setenv("PET_TAGGER_URL", "http://127.0.0.1")
     monkeypatch.setattr(
         "sys.argv",
         ["pet-immich", "extract", "--state", str(extraction_state), *(["--labeled-only"] if labeled_only else [])],
@@ -199,3 +199,32 @@ def test_encoder_rejects_incompatible_sources(encoder_source: Path, tmp_path: Pa
         with pytest.raises(ValueError, match="DINOv2"):
             export_encoder(str(encoder_source), destination)
         assert not destination.exists()
+
+
+def test_cli_training_rejects_multiple_operating_points(inference_state: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("sys.argv", ["pet-immich", "train", "--state", str(inference_state), "--error-cost", "2", "5"])
+    with pytest.raises(ValueError, match="exactly one"):
+        main()
+
+
+def test_cli_keeps_each_requested_operating_point(inference_state: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    features = Features.load(inference_state / "features.npz")
+    similarities = inference_state / "similarities.npz"
+    np.savez(similarities, ids=features.ids, raw=features.raw @ features.raw.T)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "pet-immich",
+            "compare",
+            "--state",
+            str(inference_state),
+            "--similarities",
+            str(similarities),
+            "--error-cost",
+            "2",
+            "20",
+        ],
+    )
+    main()
+    reports = json.loads((inference_state / "comparison.json").read_text())
+    assert {name: report["error_cost"] for name, report in reports.items()} == {"raw@cost=2": 2, "raw@cost=20": 20}

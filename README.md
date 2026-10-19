@@ -12,11 +12,16 @@ frozen visual features and selects the classifier and rejection thresholds insid
 near-identical images stay in the same fold. Unknown animals participate in training; ambiguous labels do not become
 identity examples.
 
-A candidate passes the deployment gate only when each identity reaches 95% precision both per crop and with capture
-events weighted equally, across at least ten accepted events. The report includes coverage, recall, unknown false
-accepts, and a one-sided precision confidence bound. Passing the point-estimate gate does not establish a 95% population
-precision lower bound. Reusing an existing labeled dataset for development also limits how independent its evaluation
-can be.
+The objective is to recover more photos of each pet while limiting incorrect assignments. Calibration maximizes
+`correct - error_cost * incorrect`, with capture events weighted equally. `--error-cost` expresses how many correct
+recoveries one incorrect assignment cancels; the default is five. Compare several costs before choosing a model.
+Training selects features and thresholds inside each outer fold. A candidate can replace the approved model only when
+both identities have positive event-weighted utility across at least ten accepted events. This is an evidence check, not
+a guarantee of future precision.
+
+Reports include correct, incorrect, known, and missed crop counts for each identity, precision, recall, and confidence
+bounds. Recall measures recovery of confirmed labeled crops; it cannot measure animals the detector missed or establish
+whole-library recall. Reusing labels during development and selecting among many experiments limits independence.
 
 ## Local installation
 
@@ -32,7 +37,10 @@ video, dataset, credential, and model formats. Tests use synthetic data.
 Set `IMMICH_URL`, `IMMICH_API_KEY`, and `PET_TAGGER_URL` in your service environment. The API key needs asset search and
 face read/create permissions. Set `IMMICH_READ_API_KEY` separately when search permissions live on a read-only key. The
 crop provider is the local [immich-pet-tagger](https://github.com/tedornitier/immich-pet-tagger) API. Fetching a crop
-uses that provider's read access; this project sends photos only to the configured local services.
+uses that provider's read access. Photo API requests accept only literal loopback or private LAN addresses and
+`localhost`; public endpoints and other hostnames fail before sending a request. These clients ignore environment
+proxies. Photos, crops, embeddings, and labels stay local. External model downloads are allowed; uploading private data
+for remote inference or training is not.
 
 Place these weights in the private state directory's `models/` subdirectory:
 
@@ -60,7 +68,7 @@ The legacy importer accepts the detector's SQLite crop cache, a labels file, and
 ```sh
 pet-immich import --state "$PET_STATE" --database "$CROP_DATABASE" --labels "$LABELS" --metadata "$METADATA"
 pet-immich extract --state "$PET_STATE" --labeled-only
-pet-immich train --state "$PET_STATE"
+pet-immich train --state "$PET_STATE" --error-cost 5
 pet-immich extract --state "$PET_STATE"
 pet-immich plan --state "$PET_STATE"
 pet-immich apply --state "$PET_STATE"
@@ -95,8 +103,16 @@ separate calibration events, and predicts held-out events. Unknown animals suppl
 average the strongest three events per identity, so one long burst cannot occupy all reference positions. The report
 counts ineligible extraction results in recall and counts accepted photos once.
 
-Calibration requires zero accepted errors across at least five events, matching the existing classifier's calibration
-policy. The held-out precision gate remains 95%; error-free calibration does not guarantee error-free predictions.
+Calibration maximizes event-weighted recoveries minus the selected error cost across at least five accepted events. A
+small number of calibration mistakes no longer forces rejection of an otherwise useful threshold. Compare operating
+points on the same folds:
+
+```sh
+pet-immich compare --state "$EXPERIMENT_STATE" --similarities "$PAIR_SCORES" --duplicates --error-cost 2 5 10 20
+```
+
+Each result records its error cost. `passed` means positive event-weighted utility for each identity across at least ten
+accepted events; compare the actual recovery and error counts rather than ranking configurations by this flag.
 
 `comparison.json` reports each composition on the same folds. It does not promote a model. Choosing the best result
 after inspecting this table is exploratory; a deployment claim needs a reserved evaluation set or nested selection of
