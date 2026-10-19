@@ -15,6 +15,7 @@ from filelock import FileLock
 
 from pet_immich.data import UNCERTAIN, UNKNOWN, Features, Sample, load_samples, private_write, save_samples
 from pet_immich.extract import extract
+from pet_immich.network import local_request
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -32,12 +33,16 @@ def run(directory: Path, *, apply: bool, sync: bool) -> None:
             raise ValueError(msg)
         identities = cast("dict[str, str]", json.loads((directory / "identities.json").read_text()))
         with httpx.Client(
+            trust_env=False,
+            event_hooks={"request": [local_request]},
             base_url=os.environ["IMMICH_URL"].rstrip("/"),
             headers={"x-api-key": os.environ["IMMICH_API_KEY"]},
             timeout=60,
         ) as client:
             if sync:
                 with httpx.Client(
+                    trust_env=False,
+                    event_hooks={"request": [local_request]},
                     base_url=os.environ["IMMICH_URL"].rstrip("/"),
                     timeout=60,
                     headers={"x-api-key": os.environ.get("IMMICH_READ_API_KEY", os.environ["IMMICH_API_KEY"])},
@@ -77,7 +82,9 @@ def discover(directory: Path, client: httpx.Client, tagger_url: str) -> None:
     samples = load_samples(directory / "samples.json")
     seen.update(sample.asset_id for sample in samples)
     page = 1
-    with httpx.Client(base_url=tagger_url, timeout=120) as tagger:
+    with httpx.Client(
+        trust_env=False, event_hooks={"request": [local_request]}, base_url=tagger_url, timeout=120
+    ) as tagger:
         while True:
             response = client.post("/api/search/metadata", json={"type": "IMAGE", "size": 1000, "page": page})
             response.raise_for_status()

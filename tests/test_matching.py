@@ -65,18 +65,18 @@ def test_matching_caches_pair_scores(
     matching_state: tuple[list[Sample], Features], expected: float, tmp_path: Path
 ) -> None:
     samples, features = matching_state
-    scores = match_candidates(samples, features, tmp_path, "http://test", limit=2)
+    scores = match_candidates(samples, features, tmp_path, "http://127.0.0.1", limit=2)
     np.testing.assert_allclose(scores[np.triu_indices(3, 1)], expected, atol=1e-6)
-    repeated = match_candidates(samples, features, tmp_path, "http://test", limit=2)
+    repeated = match_candidates(samples, features, tmp_path, "http://127.0.0.1", limit=2)
     np.testing.assert_array_equal(repeated, scores)
 
 
 @pytest.mark.parametrize("matching_state", [2], indirect=True)
 def test_matching_rejects_changed_cache(matching_state: tuple[list[Sample], Features], tmp_path: Path) -> None:
     samples, features = matching_state
-    match_candidates(samples, features, tmp_path, "http://test", limit=1)
+    match_candidates(samples, features, tmp_path, "http://127.0.0.1", limit=1)
     with pytest.raises(ValueError, match="cache changed"):
-        match_candidates(samples, features, tmp_path, "http://test", limit=2)
+        match_candidates(samples, features, tmp_path, "http://127.0.0.1", limit=2)
 
 
 @pytest.mark.parametrize("limit", [0, 1], ids=["invalid-limit", "misaligned"])
@@ -85,4 +85,4 @@ def test_matching_requires_aligned_inputs(
 ) -> None:
     samples, features = population
     with pytest.raises(ValueError, match="aligned samples"):
-        match_candidates(samples[::-1] if limit else samples, features, tmp_path, "http://test", limit=limit)
+        match_candidates(samples[::-1] if limit else samples, features, tmp_path, "http://127.0.0.1", limit=limit)

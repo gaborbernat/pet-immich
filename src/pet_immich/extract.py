@@ -16,6 +16,7 @@ from PIL import Image
 
 from pet_immich.data import Features, digest, normalize
 from pet_immich.miewid import load_miewid
+from pet_immich.network import local_request
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -67,7 +68,7 @@ def _serial_extract(
     faces = list(existing.face) if existing is not None else []
     hashes = list(existing.hashes) if existing is not None else []
     valid = list(existing.valid) if existing is not None else []
-    with httpx.Client(timeout=60) as client:
+    with httpx.Client(trust_env=False, event_hooks={"request": [local_request]}, timeout=60) as client:
         for index, sample in enumerate(pending, 1):
             query = urlencode({"bbox": ",".join(map(str, sample.box))})
             response = client.get(f"{tagger_url}/api/crop/{sample.asset_id}?{query}")

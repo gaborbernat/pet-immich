@@ -114,5 +114,5 @@ layers = [
   "model | importer | encoder",
   "extract | metric | grouping | matching",
   "miewid",
-  "data"
+  "data | network"
 ]

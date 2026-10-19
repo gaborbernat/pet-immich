@@ -19,10 +19,10 @@ if TYPE_CHECKING:
 
 def test_extraction_caches_normalized_views(extraction_state: Path) -> None:
     samples = [Sample("crop", "asset", (0, 0, 1, 1))]
-    actual = extract(samples, extraction_state, "http://test", workers=1)
+    actual = extract(samples, extraction_state, "http://127.0.0.1", workers=1)
     assert (actual.ids, actual.valid.tolist()) == (["crop"], [True])
     np.testing.assert_allclose(np.linalg.norm(actual.raw, axis=1), [1], atol=1e-6)
-    repeated = extract(samples, extraction_state, "http://test", workers=1)
+    repeated = extract(samples, extraction_state, "http://127.0.0.1", workers=1)
     np.testing.assert_array_equal(actual.face, repeated.face)
 
 
@@ -37,19 +37,19 @@ def test_extraction_resumes_without_repeating_cached_crops(extraction_state: Pat
         "previous-model",
     ).save(extraction_state / "features.npz")
     with pytest.raises(ValueError, match="models changed"):
-        extract([Sample("crop", "asset", (0, 0, 1, 1))], extraction_state, "http://test")
+        extract([Sample("crop", "asset", (0, 0, 1, 1))], extraction_state, "http://127.0.0.1")
 
 
 def test_refresh_replaces_incompatible_features(extraction_state: Path) -> None:
     (extraction_state / "features.npz").write_bytes(b"obsolete-cache")
-    actual = extract([Sample("crop", "asset", (0, 0, 1, 1))], extraction_state, "http://test", refresh=True)
+    actual = extract([Sample("crop", "asset", (0, 0, 1, 1))], extraction_state, "http://127.0.0.1", refresh=True)
     assert actual.ids == ["crop"]
 
 
 def test_extraction_supports_miewid_weights(extraction_state: Path, miewid_weights: Path) -> None:
     (extraction_state / "models" / "encoder.onnx").unlink()
     shutil.copyfile(miewid_weights, extraction_state / "models" / "encoder.safetensors")
-    actual = extract([Sample("crop", "asset", (0, 0, 1, 1))], extraction_state, "http://test", workers=1)
+    actual = extract([Sample("crop", "asset", (0, 0, 1, 1))], extraction_state, "http://127.0.0.1", workers=1)
     assert actual.raw.shape == (1, 2152)
     np.testing.assert_allclose(np.linalg.norm(actual.raw, axis=1), [1], atol=1e-6)
 
@@ -62,7 +62,7 @@ def test_parallel_extraction_merges_unique_crops(
     resume: bool,
 ) -> None:
     samples = [Sample(f"crop-{index}", f"asset-{index}", (0, 0, 1, 1)) for index in range(30)]
-    baseline = extract(samples[:1], extraction_state, "http://test", workers=1)
+    baseline = extract(samples[:1], extraction_state, "http://127.0.0.1", workers=1)
     if not resume:
         (extraction_state / "features.npz").unlink()
     futures = []
@@ -84,7 +84,7 @@ def test_parallel_extraction_merges_unique_crops(
     executor.__enter__.return_value = executor
     executor.submit.side_effect = futures
     mocker.patch("pet_immich.extract.ProcessPoolExecutor", return_value=executor)
-    actual = extract(samples, extraction_state, "http://test", workers=2)
+    actual = extract(samples, extraction_state, "http://127.0.0.1", workers=2)
     assert sorted(actual.ids) == sorted(sample.id for sample in samples)
     np.testing.assert_allclose(actual.raw, np.repeat(baseline.raw, 30, axis=0))
 
@@ -106,5 +106,5 @@ def test_extraction_rejects_ambiguity_without_requiring_segmentation(
         )
     ]
     mocker.patch("ultralytics.YOLO", return_value=segmenter)
-    actual = extract([Sample("crop", "asset", (0, 0, 1, 1))], extraction_state, "http://test", workers=1)
+    actual = extract([Sample("crop", "asset", (0, 0, 1, 1))], extraction_state, "http://127.0.0.1", workers=1)
     assert actual.valid.tolist() == [eligible]

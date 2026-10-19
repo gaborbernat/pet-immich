@@ -79,7 +79,7 @@ def test_application_is_idempotent(tmp_path: Path) -> None:
             return httpx.Response(204)
         return httpx.Response(200, json=faces)
 
-    with httpx.Client(base_url="http://test", transport=httpx.MockTransport(respond)) as client:
+    with httpx.Client(base_url="http://127.0.0.1", transport=httpx.MockTransport(respond)) as client:
         plan = [Assignment(Sample("crop", "asset", (0, 0, 1, 1)), "pet-a", "create")]
         apply_assignments(client, plan, tmp_path, "version")
         apply_assignments(client, plan, tmp_path, "version")
@@ -91,7 +91,7 @@ def test_failed_readback_does_not_record_success(tmp_path: Path) -> None:
         return httpx.Response(200, json={} if request.method == "POST" else [])
 
     with (
-        httpx.Client(base_url="http://test", transport=httpx.MockTransport(respond)) as client,
+        httpx.Client(base_url="http://127.0.0.1", transport=httpx.MockTransport(respond)) as client,
         pytest.raises(RuntimeError, match="did not retain"),
     ):
         apply_assignments(
@@ -118,7 +118,7 @@ def test_discovery_handles_old_photos_uploaded_later(tmp_path: Path, mocker: Moc
             )
         return httpx.Response(200, json={"crops": [[0, 0, 1, 1]]})
 
-    with original(base_url="http://test", transport=httpx.MockTransport(respond)) as client:
+    with original(base_url="http://127.0.0.1", transport=httpx.MockTransport(respond)) as client:
         mocker.patch(
             "pet_immich.runtime.httpx.Client",
             return_value=original(transport=httpx.MockTransport(respond), base_url="http://tagger"),
@@ -133,11 +133,11 @@ def test_plan_preserves_confirmed_labels(
     def respond(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json=[])
 
-    monkeypatch.setenv("IMMICH_URL", "http://test")
+    monkeypatch.setenv("IMMICH_URL", "http://127.0.0.1")
     monkeypatch.setenv("IMMICH_API_KEY", "synthetic")
     mocker.patch(
         "pet_immich.runtime.httpx.Client",
-        return_value=httpx.Client(base_url="http://test", transport=httpx.MockTransport(respond)),
+        return_value=httpx.Client(base_url="http://127.0.0.1", transport=httpx.MockTransport(respond)),
     )
     samples = load_samples(inference_state / "samples.json")
     samples[0] = replace(samples[0], label="pet-b")
@@ -164,7 +164,7 @@ def test_runtime_refuses_incompatible_state(
     monkeypatch: pytest.MonkeyPatch,
     failure: str,
 ) -> None:
-    monkeypatch.setenv("IMMICH_URL", "http://test")
+    monkeypatch.setenv("IMMICH_URL", "http://127.0.0.1")
     monkeypatch.setenv("IMMICH_API_KEY", "synthetic")
     if failure == "signature":
         features = Features.load(inference_state / "features.npz")
@@ -222,7 +222,7 @@ def test_runtime_sync_uses_cache_and_applies_new_assignments(
             return httpx.Response(204)
         return httpx.Response(200, json=faces.get(request.url.params["id"], []))
 
-    monkeypatch.setenv("IMMICH_URL", "http://test")
+    monkeypatch.setenv("IMMICH_URL", "http://127.0.0.1")
     monkeypatch.setenv("IMMICH_API_KEY", "synthetic")
     monkeypatch.setenv("PET_TAGGER_URL", "http://tagger")
     original = client_type

@@ -13,6 +13,7 @@ import torch
 from PIL import Image
 
 from pet_immich.data import private_write
+from pet_immich.network import local_request
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -43,7 +44,7 @@ def match_candidates(
     pairs = sorted({
         tuple(sorted((index, int(other)))) for index, others in enumerate(candidates.tolist()) for other in others
     })
-    with httpx.Client(timeout=60) as client:
+    with httpx.Client(trust_env=False, event_hooks={"request": [local_request]}, timeout=60) as client:
         for index, (first, second) in enumerate(pairs, 1):
             if np.isnan(scores[first, second]):
                 left = matcher.describe(samples[first], directory, client, tagger_url)
