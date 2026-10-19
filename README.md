@@ -63,8 +63,13 @@ pet-immich apply --state "$PET_STATE"
 assign the photograph's identity to multiple detections. `Neither` trains the unknown class; `Unsure` stays untagged.
 
 Create `identities.json` inside the private state directory, mapping training labels to existing Immich person IDs. A
-failed training gate saves a candidate and its report but never replaces the approved model. Feature-model hashes
-prevent using an approved classifier with different extraction weights.
+failed training gate saves a candidate and its report but never replaces the approved model. Feature-model hashes and
+the preprocessing revision prevent using an approved classifier with different weights or crop handling. After either
+changes, extract into a separate state directory and retrain before replacing the production cache and classifier.
+
+Face localization orders the predicted corners and reverses the localizer's integer letterbox padding. A failed second
+segmentation pass keeps the original detector crop eligible; multiple segmentation masks still prevent automatic
+assignment. Missing segmentation and an ambiguous identity are different failures.
 
 Application checks existing faces before each write, preserves conflicting assignments, verifies each creation, and
 saves a private audit. Repeating a completed run does not create duplicate faces. Conflicts appear in `plan.json` for

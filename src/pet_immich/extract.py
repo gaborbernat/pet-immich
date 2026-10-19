@@ -11,7 +11,7 @@ from urllib.parse import urlencode
 import httpx
 import numpy as np
 import onnxruntime as ort
-from PIL import Image, ImageOps
+from PIL import Image
 
 from pet_immich.data import Features, digest, normalize
 
@@ -38,7 +38,9 @@ def extract(
     """Checkpoint by crop ID so interrupted backfills can resume without repeating inference."""
     models = models_directory or directory / "models"
     signature = hashlib.sha256(
-        "|".join(digest(models / name) for name in ("encoder.onnx", "segment.pt", "localizer.tflite")).encode()
+        (
+            "views-v2|" + "|".join(digest(models / name) for name in ("encoder.onnx", "segment.pt", "localizer.tflite"))
+        ).encode()
     ).hexdigest()
     cache = directory / "features.npz"
     existing = Features.load(cache) if cache.exists() and not refresh else None
@@ -120,8 +122,9 @@ def parallel_extract(
             if existing is None:
                 existing = result
             else:
+                stored = set(existing.ids)
                 indices = np.asarray(
-                    [index for index, key in enumerate(result.ids) if key not in set(existing.ids)], dtype=np.int64
+                    [index for index, key in enumerate(result.ids) if key not in stored], dtype=np.int64
                 )
                 existing = Features(
                     existing.ids + [result.ids[index] for index in indices],
@@ -161,7 +164,10 @@ class _Extractor:
             mask = Image.fromarray((masks.data[0].cpu().numpy() * 255).astype(np.uint8))
             mask = mask.resize(image.size, Image.Resampling.NEAREST)
             foreground = Image.composite(image, Image.new("RGB", image.size, (127, 127, 127)), mask)
-        square = ImageOps.pad(image, (224, 224), color=(0, 0, 0))
+        scale = 224 / max(image.size)
+        resized = image.resize([round(side * scale) for side in image.size], Image.Resampling.BILINEAR)
+        square = Image.new("RGB", (224, 224))
+        square.paste(resized, ((224 - resized.width) // 2, (224 - resized.height) // 2))
         self.localizer.set_tensor(
             self.localizer.get_input_details()[0]["index"], (np.asarray(square, dtype=np.float32) / 255)[None]
         )
@@ -169,14 +175,16 @@ class _Extractor:
         box = self.localizer.get_tensor(self.localizer.get_output_details()[0]["index"])[0]
         head = face_crop(image, box)
         vectors = encode(self.encoder, [image, foreground, head])
-        return vectors, single
+        # A missed second detection does not invalidate the provider's original animal crop.
+        return vectors, masks is None or len(masks) <= 1
 
 
 def face_crop(image: Image.Image, box: Matrix) -> Image.Image:
     """Undo letterboxing before cropping; keep the animal when localization is unusable."""
     scale = 224 / max(image.size)
-    offset = np.asarray([(224 - image.width * scale) / 2, (224 - image.height * scale) / 2] * 2)
-    coordinates = (np.asarray(box) * 224 - offset) / scale
+    offset = np.asarray([(224 - round(side * scale)) // 2 for side in image.size] * 2)
+    # Upstream inference sorts independently predicted corners before undoing the letterbox.
+    coordinates = (np.sort(np.clip(box, 0, 1).reshape(2, 2), axis=0).reshape(4) * 224 - offset) / scale
     coordinates += np.asarray([-1, -1, 1, 1]) * max(coordinates[2:] - coordinates[:2]) * 0.1
     coordinates = np.clip(coordinates, 0, [image.width, image.height] * 2)
     minimum_head_pixels: Final = 16

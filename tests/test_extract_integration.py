@@ -80,13 +80,22 @@ def test_parallel_extraction_merges_unique_crops(
     np.testing.assert_allclose(actual.raw, np.repeat(baseline.raw, 30, axis=0))
 
 
-def test_multiple_animals_are_ineligible_for_automatic_assignment(
-    extraction_state: Path, mocker: MockerFixture
+@pytest.mark.parametrize(
+    ("count", "eligible"),
+    [pytest.param(0, True, id="missed-segmentation"), pytest.param(2, False, id="multiple-animals")],
+)
+def test_extraction_rejects_ambiguity_without_requiring_segmentation(
+    extraction_state: Path, mocker: MockerFixture, count: int, *, eligible: bool
 ) -> None:
     segmenter = mocker.create_autospec(YOLO, instance=True)
     segmenter.predict.return_value = [
-        Results(np.zeros((16, 16, 3), dtype=np.uint8), "synthetic", {16: "dog"}, masks=torch.ones(2, 16, 16))
+        Results(
+            np.zeros((16, 16, 3), dtype=np.uint8),
+            "synthetic",
+            {16: "dog"},
+            masks=torch.ones(count, 16, 16) if count else None,
+        )
     ]
     mocker.patch("ultralytics.YOLO", return_value=segmenter)
     actual = extract([Sample("crop", "asset", (0, 0, 1, 1))], extraction_state, "http://test", workers=1)
-    assert actual.valid.tolist() == [False]
+    assert actual.valid.tolist() == [eligible]

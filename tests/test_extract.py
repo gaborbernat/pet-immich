@@ -1,12 +1,21 @@
 import numpy as np
+import pytest
 from PIL import Image
 
 from pet_immich.extract import difference_hash, face_crop
 
 
-def test_face_crop_undoes_letterbox() -> None:
+@pytest.mark.parametrize(
+    "box",
+    [
+        pytest.param([0.25, 0.25, 0.75, 0.75], id="ordered"),
+        pytest.param([0.75, 0.25, 0.25, 0.75], id="reversed-x"),
+        pytest.param([0.25, 0.75, 0.75, 0.25], id="reversed-y"),
+    ],
+)
+def test_face_crop_undoes_letterbox(box: list[float]) -> None:
     image = Image.new("RGB", (400, 200))
-    head = face_crop(image, np.asarray([0.25, 0.25, 0.75, 0.75], dtype=np.float32))
+    head = face_crop(image, np.asarray(box, dtype=np.float32))
     assert head.size == (240, 200)
 
 

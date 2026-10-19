@@ -185,8 +185,11 @@ def test_runtime_sync_uses_cache_and_applies_new_assignments(
     mocker: MockerFixture,
 ) -> None:
     signature = hashlib.sha256(
-        "|".join(
-            digest(inference_state / "models" / name) for name in ("encoder.onnx", "segment.pt", "localizer.tflite")
+        (
+            "views-v2|"
+            + "|".join(
+                digest(inference_state / "models" / name) for name in ("encoder.onnx", "segment.pt", "localizer.tflite")
+            )
         ).encode()
     ).hexdigest()
     features = Features.load(inference_state / "features.npz")
