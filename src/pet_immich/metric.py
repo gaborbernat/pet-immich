@@ -1,20 +1,12 @@
-from __future__ import annotations
-
-from typing import TYPE_CHECKING
-
 import numpy as np
 import torch
+from numpy.typing import NDArray
 from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.svm import SVC
 from torch import nn
 from torch.nn import functional
 
-from pet_immich.data import UNKNOWN, normalize
-
-if TYPE_CHECKING:
-    from numpy.typing import NDArray
-
-    from pet_immich.data import Matrix
+from pet_immich.data import UNKNOWN, Matrix, normalize
 
 
 class MetricSVC(ClassifierMixin, BaseEstimator):

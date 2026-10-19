@@ -21,7 +21,7 @@ can be.
 ## Local installation
 
 ```sh
-uv sync --python 3.12 --extra vision --extra dev
+uv sync --python 3.14 --extra vision --extra dev
 ```
 
 Keep the state directory outside this checkout. It holds photos if cached by a detector, labels, asset identifiers,
