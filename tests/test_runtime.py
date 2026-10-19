@@ -64,6 +64,7 @@ def test_application_is_idempotent(tmp_path: Path) -> None:
             body = json.loads(request.content)
             faces.append(
                 {
+                    "id": "face",
                     "imageWidth": 10000,
                     "imageHeight": 10000,
                     "boundingBoxX1": body["x"],
@@ -73,7 +74,7 @@ def test_application_is_idempotent(tmp_path: Path) -> None:
                     "person": {"id": body["personId"]},
                 }
             )
-            return httpx.Response(201, json={"id": "face"})
+            return httpx.Response(204)
         return httpx.Response(200, json=faces)
 
     with httpx.Client(base_url="http://test", transport=httpx.MockTransport(respond)) as client:

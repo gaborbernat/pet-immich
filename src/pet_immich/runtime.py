@@ -142,7 +142,9 @@ def apply_assignments(client: httpx.Client, planned: list[Assignment], directory
                 "sample": asdict(sample),
                 "person": assignment.person,
                 "model": version,
-                "response": response.json(),
+                "face_ids": [
+                    face["id"] for face in faces if face_action(sample, assignment.person, [face]) == "exists"
+                ],
                 "verified": True,
             }
         )
