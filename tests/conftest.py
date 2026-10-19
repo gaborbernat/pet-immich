@@ -1,7 +1,29 @@
-import numpy as np
-import pytest
+import io
+import json
+from typing import TYPE_CHECKING
 
-from pet_immich.data import UNKNOWN, Features, Sample, normalize
+import httpx
+import joblib
+import numpy as np
+import onnx
+import pytest
+import torch
+from ai_edge_litert.interpreter import Interpreter
+from onnx import TensorProto, helper
+from PIL import Image
+from ultralytics import YOLO
+from ultralytics.engine.results import Results
+
+from pet_immich.data import Features, Sample, save_samples
+from pet_immich.model import train
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from pytest_mock import MockerFixture
+
+
+from pet_immich.data import UNKNOWN, normalize
 
 
 @pytest.fixture
@@ -24,3 +46,51 @@ def population() -> tuple[list[Sample], Features]:
         "synthetic",
     )
     return samples, features
+
+
+@pytest.fixture
+def extraction_state(tmp_path: Path, mocker: MockerFixture, client_type: type[httpx.Client]) -> Path:
+    models = tmp_path / "models"
+    models.mkdir()
+    graph = helper.make_graph(
+        [helper.make_node("ReduceMean", ["input"], ["embedding"], axes=[2, 3], keepdims=0)],
+        "synthetic-encoder",
+        [helper.make_tensor_value_info("input", TensorProto.FLOAT, [None, 3, 224, 224])],
+        [helper.make_tensor_value_info("embedding", TensorProto.FLOAT, [None, 3])],
+    )
+    onnx.save(
+        helper.make_model(graph, opset_imports=[helper.make_opsetid("", 17)], ir_version=9), models / "encoder.onnx"
+    )
+    (models / "segment.pt").write_bytes(b"synthetic-segmentation-boundary")
+    (models / "localizer.tflite").write_bytes(b"synthetic-localizer-boundary")
+    segmenter = mocker.create_autospec(YOLO, instance=True)
+    segmenter.predict.return_value = [
+        Results(np.zeros((16, 16, 3), dtype=np.uint8), "synthetic", {16: "dog"}, masks=torch.ones(1, 16, 16))
+    ]
+    mocker.patch("ultralytics.YOLO", return_value=segmenter)
+    localizer = mocker.create_autospec(Interpreter, instance=True)
+    localizer.get_input_details.return_value = [{"index": 0}]
+    localizer.get_output_details.return_value = [{"index": 1}]
+    localizer.get_tensor.return_value = np.asarray([[0.1, 0.1, 0.9, 0.9]], dtype=np.float32)
+    mocker.patch("ai_edge_litert.interpreter.Interpreter", return_value=localizer)
+    pixels = io.BytesIO()
+    Image.new("RGB", (64, 64), (255, 0, 0)).save(pixels, format="PNG")
+    transport = httpx.MockTransport(lambda _: httpx.Response(200, content=pixels.getvalue()))
+    mocker.patch("pet_immich.extract.httpx.Client", return_value=client_type(transport=transport))
+    return tmp_path
+
+
+@pytest.fixture
+def inference_state(tmp_path: Path, population: tuple[list[Sample], Features]) -> Path:
+    samples, features = population
+    model, _ = train(samples, features)
+    joblib.dump(model, tmp_path / "approved.joblib")
+    save_samples(tmp_path / "samples.json", samples)
+    features.save(tmp_path / "features.npz")
+    (tmp_path / "identities.json").write_text(json.dumps({"pet-a": "identity-a", "pet-b": "identity-b"}))
+    return tmp_path
+
+
+@pytest.fixture
+def client_type() -> type[httpx.Client]:
+    return httpx.Client

@@ -1,20 +1,28 @@
-from pathlib import Path
+"""Export compatible animal encoders without executing repository-provided Python."""
+
+from typing import TYPE_CHECKING
 
 import torch
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
 
 def export_encoder(source: str, destination: Path) -> None:
-    import onnx
-    from transformers import AutoImageProcessor, AutoModel
+    """Reject incompatible preprocessing before creating an inference artifact."""
+    import onnx  # ruff: ignore[import-outside-top-level] - optional models.
+    from transformers import AutoImageProcessor, AutoModel  # ruff: ignore[import-outside-top-level] - optional models.
 
     if destination.exists():
         raise FileExistsError(destination)
     processor = AutoImageProcessor.from_pretrained(source, trust_remote_code=False)
     if list(processor.image_mean) != [0.485, 0.456, 0.406] or list(processor.image_std) != [0.229, 0.224, 0.225]:
-        raise ValueError("Encoder requires different normalization; adapt extraction before exporting")
+        msg = "Encoder requires different normalization; adapt extraction before exporting"
+        raise ValueError(msg)
     model = AutoModel.from_pretrained(source, trust_remote_code=False, attn_implementation="eager").eval()
     if model.config.model_type != "dinov2":
-        raise ValueError("This exporter supports DINOv2 encoders")
+        msg = "This exporter supports DINOv2 encoders"
+        raise ValueError(msg)
     destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     torch.set_num_threads(4)
     torch.onnx.export(

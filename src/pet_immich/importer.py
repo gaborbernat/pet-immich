@@ -1,22 +1,29 @@
+"""Recover confirmed labels from the trusted upstream detector cache."""
+
 import csv
 import json
-import pickle
+import pickle  # ruff: ignore[suspicious-pickle-import] - the upstream local cache format requires pickle.
 import sqlite3
-from pathlib import Path
+from contextlib import closing
+from typing import TYPE_CHECKING, cast
 
 from pet_immich.data import UNCERTAIN, UNKNOWN, Sample
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
 
 def import_legacy(database: Path, labels_path: Path, metadata_path: Path) -> list[Sample]:
-    labels: dict[str, str] = json.loads(labels_path.read_text())
-    with metadata_path.open() as stream:
+    """Preserve explicit crop labels without guessing identities in multi-animal photos."""
+    labels = cast("dict[str, str]", json.loads(labels_path.read_text(encoding="utf-8")))
+    with metadata_path.open(encoding="utf-8") as stream:
         metadata = {row["id"]: row for row in csv.DictReader(stream)}
-    with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as connection:
+    with closing(sqlite3.connect(f"file:{database}?mode=ro", uri=True)) as connection:
         rows = connection.execute("SELECT asset_id, data FROM crops ORDER BY asset_id").fetchall()
     samples = []
     for asset_id, data in rows:
         # The upstream detector stores trusted local crop records as pickles.
-        boxes = [box for box, _ in pickle.loads(data)]
+        boxes = [box for box, _ in pickle.loads(data)]  # ruff: ignore[suspicious-pickle-usage] - trusted local cache.
         for index, box in enumerate(boxes):
             crop_id = f"{asset_id}:{index}"
             label = labels.get(crop_id)

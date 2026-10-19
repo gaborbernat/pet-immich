@@ -1,14 +1,18 @@
 import json
-import pickle
+import pickle  # ruff: ignore[suspicious-pickle-import] - creates the upstream cache format for the importer test.
 import sqlite3
-from pathlib import Path
+from contextlib import closing
+from typing import TYPE_CHECKING
 
 from pet_immich.data import UNKNOWN
 from pet_immich.importer import import_legacy
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
 
 def test_import_keeps_crop_labels_without_guessing_pairs(tmp_path: Path) -> None:
-    with sqlite3.connect(tmp_path / "crops.db") as database:
+    with closing(sqlite3.connect(tmp_path / "crops.db")) as database:
         database.execute("CREATE TABLE crops (asset_id TEXT, data BLOB)")
         database.executemany(
             "INSERT INTO crops VALUES (?, ?)",
@@ -18,6 +22,7 @@ def test_import_keeps_crop_labels_without_guessing_pairs(tmp_path: Path) -> None
                 ("other", pickle.dumps([([0, 0, 1, 1], [])])),
             ],
         )
+        database.commit()
     (tmp_path / "labels.json").write_text(
         json.dumps({"one": "pet-a", "two": "Both", "two:1": "pet-b", "other": "Neither"})
     )

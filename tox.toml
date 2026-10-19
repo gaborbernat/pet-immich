@@ -1,16 +1,22 @@
-env_list = ["test", "type"]
+env_list = ["test", "type", "lint"]
 
 [env_run_base]
 base_python = ["3.14"]
+set_env = { OPENBLAS_NUM_THREADS = "2", OMP_NUM_THREADS = "2" }
 pass_env = ["UV_*", "PET_TEST_STATE"]
 
 [env.test]
-extras = ["test"]
-commands = [["pytest", "--cov=pet_immich", "--cov-report=term-missing", "{posargs:tests}"]]
+extras = ["test", "vision"]
+commands = [["pytest", "--cov", "--cov-report=term-missing", "{posargs:tests}"]]
 
 [env.dev]
+package = "editable"
 extras = ["dev", "vision"]
 
 [env.type]
 extras = ["dev", "vision"]
-commands = [["ty", "check", "src", "tests", "--python", "{env_python}"]]
+commands = [["ty", "check", "src", "tests", "--python", "{env_python}", "--error-on-warning"]]
+
+[env.lint]
+extras = ["dev"]
+commands = [["ruff", "format", "--check", "."], ["ruff", "check", "."]]

@@ -8,11 +8,16 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    env:
+      OPENBLAS_NUM_THREADS: "2"
+      OMP_NUM_THREADS: "2"
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: astral-sh/setup-uv@v10.3.0
         with:
           python-version: '3.14'
-      - run: uv sync --extra dev
-      - run: uv run pytest
+      - run: uv sync --locked --extra dev --extra vision --extra test
+      - run: uv run pytest --cov --cov-report=term-missing
+      - run: uv run ruff format --check .
       - run: uv run ruff check .
+      - run: uv run ty check src tests --error-on-warning

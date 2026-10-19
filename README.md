@@ -84,8 +84,16 @@ until an approved model exists. Add a local mount condition if the image service
 ## Development
 
 ```sh
-tox -e test,type
+tox -e test,type,lint
 ```
+
+Tests enforce 100% line and branch coverage across application and test code, including subprocess entry points. Ruff
+enables all rules with documented formatter and test conventions; ty treats diagnostics and warnings as errors. CI runs
+the same checks on Linux and Windows with Python 3.14. Every direct dependency has a minimum version; `uv.lock` records
+the tested resolution.
+
+Inference tests generate images and a small ONNX encoder locally. They mock network calls and native model boundaries;
+no personal photos, labels, credentials, or pretrained weights are needed in CI.
 
 Research behind the approach:
 
