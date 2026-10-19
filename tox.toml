@@ -1,0 +1,16 @@
+env_list = ["test", "type"]
+
+[env_run_base]
+base_python = ["3.12"]
+pass_env = ["UV_*", "PET_TEST_STATE"]
+
+[env.test]
+extras = ["test"]
+commands = [["pytest", "--cov=pet_immich", "--cov-report=term-missing", "{posargs:tests}"]]
+
+[env.dev]
+extras = ["dev", "vision"]
+
+[env.type]
+extras = ["dev", "vision"]
+commands = [["ty", "check", "src", "tests", "--python", "{env_python}"]]

@@ -1,0 +1,12 @@
+[Unit]
+Description=Recognize pets in new Immich photos
+ConditionPathExists=%h/.local/state/pet-immich/approved.joblib
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/.local/state/pet-immich/service.env
+Environment=OPENBLAS_NUM_THREADS=2
+Environment=OMP_NUM_THREADS=2
+ExecStart=%h/.local/bin/pet-immich sync --state %h/.local/state/pet-immich
+TimeoutStartSec=infinity
+UMask=0077

@@ -1,0 +1,37 @@
+[project]
+name = "pet-immich"
+version = "0.1.0"
+requires-python = ">=3.12"
+description = "Local pet identity recognition for Immich"
+dependencies = ["numpy", "scipy", "scikit-learn", "joblib", "httpx", "pillow", "onnxruntime", "filelock", "torch"]
+
+[project.optional-dependencies]
+vision = ["ultralytics", "ai-edge-litert", "transformers", "onnx"]
+test = ["pytest", "pytest-cov", "pytest-mock"]
+dev = ["ruff", "ty", "pytest", "pytest-cov", "pytest-mock", "mdformat"]
+
+[project.scripts]
+pet-immich = "pet_immich.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+torchvision = { index = "pytorch-cpu" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
