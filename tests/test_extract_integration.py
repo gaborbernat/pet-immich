@@ -1,3 +1,4 @@
+import shutil
 from concurrent.futures import Future, ProcessPoolExecutor
 from typing import TYPE_CHECKING
 
@@ -43,6 +44,14 @@ def test_refresh_replaces_incompatible_features(extraction_state: Path) -> None:
     (extraction_state / "features.npz").write_bytes(b"obsolete-cache")
     actual = extract([Sample("crop", "asset", (0, 0, 1, 1))], extraction_state, "http://test", refresh=True)
     assert actual.ids == ["crop"]
+
+
+def test_extraction_supports_miewid_weights(extraction_state: Path, miewid_weights: Path) -> None:
+    (extraction_state / "models" / "encoder.onnx").unlink()
+    shutil.copyfile(miewid_weights, extraction_state / "models" / "encoder.safetensors")
+    actual = extract([Sample("crop", "asset", (0, 0, 1, 1))], extraction_state, "http://test", workers=1)
+    assert actual.raw.shape == (1, 2152)
+    np.testing.assert_allclose(np.linalg.norm(actual.raw, axis=1), [1], atol=1e-6)
 
 
 @pytest.mark.parametrize("resume", [False, True], ids=["fresh", "resume"])

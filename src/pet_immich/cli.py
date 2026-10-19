@@ -8,7 +8,9 @@ import sys
 from pathlib import Path
 
 import joblib
+import numpy as np
 
+from pet_immich.benchmark import compare
 from pet_immich.data import Features, load_samples, private_write, save_samples
 from pet_immich.encoder import export_encoder
 from pet_immich.extract import extract
@@ -20,7 +22,9 @@ from pet_immich.runtime import run
 def main() -> None:
     """Keep training and application explicit so scheduled runs cannot retrain themselves."""
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=["import", "extract", "train", "plan", "apply", "sync", "export-encoder"])
+    parser.add_argument(
+        "command", choices=["import", "extract", "train", "compare", "plan", "apply", "sync", "export-encoder"]
+    )
     parser.add_argument("--state", type=Path, required=True)
     parser.add_argument("--database", type=Path)
     parser.add_argument("--labels", type=Path)
@@ -28,9 +32,13 @@ def main() -> None:
     parser.add_argument("--labeled-only", action="store_true")
     parser.add_argument("--source")
     parser.add_argument("--refresh", action="store_true")
+    parser.add_argument("--similarities", type=Path)
+    parser.add_argument("--duplicates", action="store_true")
     args = parser.parse_args()
     os.umask(0o077)
     args.state.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if args.command == "compare" and args.similarities is None:
+        parser.error("compare requires --similarities")
     if args.command == "export-encoder":
         if not args.source:
             parser.error("export-encoder requires --source")
@@ -47,20 +55,42 @@ def main() -> None:
         if args.labeled_only:
             samples = [sample for sample in samples if sample.label is not None]
         extract(samples, args.state, os.environ["PET_TAGGER_URL"], refresh=args.refresh)
+    elif args.command == "compare":
+        _compare(args)
     elif args.command == "train":
-        model, report = train(samples, Features.load(args.state / "features.npz"))
-        stream = io.BytesIO()
-        joblib.dump(model, stream)
-        private_write(args.state / "candidate.joblib", stream.getvalue())
-        private_write(args.state / "validation.json", json.dumps(report, indent=2).encode())
-        sys.stdout.write(json.dumps(report, indent=2) + "\n")
-        if model.approved:
-            private_write(args.state / "approved.joblib", stream.getvalue())
-        else:
-            msg = "Validation failed; candidate was not promoted"
-            raise SystemExit(msg)
+        _train(args.state)
     else:
         run(args.state, apply=args.command in {"apply", "sync", "export-encoder"}, sync=args.command == "sync")
+
+
+def _train(directory: Path) -> None:
+    model, report = train(load_samples(directory / "samples.json"), Features.load(directory / "features.npz"))
+    stream = io.BytesIO()
+    joblib.dump(model, stream)
+    private_write(directory / "candidate.joblib", stream.getvalue())
+    private_write(directory / "validation.json", json.dumps(report, indent=2).encode())
+    sys.stdout.write(json.dumps(report, indent=2) + "\n")
+    if model.approved:
+        private_write(directory / "approved.joblib", stream.getvalue())
+    else:
+        msg = "Validation failed; candidate was not promoted"
+        raise SystemExit(msg)
+
+
+def _compare(args: argparse.Namespace) -> None:
+    features = Features.load(args.state / "features.npz")
+    with np.load(args.similarities, allow_pickle=False) as archive:
+        if archive["ids"].tolist() != features.ids:
+            msg = "Similarity IDs must match the feature cache in order"
+            raise ValueError(msg)
+        comparison = compare(
+            load_samples(args.state / "samples.json"),
+            features,
+            {name: archive[name] for name in archive.files if name != "ids"},
+            group_duplicates=args.duplicates,
+        )
+    private_write(args.state / "comparison.json", json.dumps(comparison, indent=2).encode())
+    sys.stdout.write(json.dumps(comparison, indent=2) + "\n")
 
 
 def _import(args: argparse.Namespace) -> None:

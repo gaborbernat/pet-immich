@@ -61,7 +61,7 @@ def train(samples: list[Sample], features: Features) -> tuple[IdentityModel, _Re
     report["groups"] = len(set(groups))
     report["class_counts"] = dict(Counter(targets.tolist()))
     report["method"] = "nested grouped CV; inner model/threshold selection; outer evaluation only"
-    report["passed"] = _passes(report)
+    report["passed"] = passes(report)
     final, selection = select_model(matrices, targets, groups)
     final.signature = features.signature
     final.approved = report["passed"]
@@ -69,7 +69,8 @@ def train(samples: list[Sample], features: Features) -> tuple[IdentityModel, _Re
     return final, report
 
 
-def _passes(report: _Report) -> bool:
+def passes(report: _Report) -> bool:
+    """Require precision for each identity rather than averaging away a weak class."""
     minimum_precision: Final = 0.95
     minimum_events: Final = 10
     return all(
@@ -101,6 +102,7 @@ def capture_groups(samples: list[Sample], raw: Matrix, hashes: NDArray[np.uint64
 def splits(
     targets: NDArray[np.str_], groups: NDArray[np.int32], count: int
 ) -> list[tuple[NDArray[np.int64], NDArray[np.int64]]]:
+    """Keep related captures together while retaining each class across folds."""
     count = min(count, *(len(set(groups[targets == name])) for name in np.unique(targets)))
     minimum_folds: Final = 2
     if count < minimum_folds:
@@ -173,6 +175,7 @@ def fit(values: Matrix, targets: NDArray[np.str_], groups: NDArray[np.int32], mo
 
 
 def event_weights(groups: NDArray[np.int32]) -> NDArray[np.float64]:
+    """Give each event equal weight regardless of burst size."""
     counts = Counter(groups)
     weights = np.asarray([1 / counts[group] for group in groups])
     return weights * len(groups) / weights.sum()
@@ -188,7 +191,7 @@ def metrics(
     targets: NDArray[np.str_], predicted: NDArray[np.str_], groups: NDArray[np.int32], names: list[str]
 ) -> _Report:
     """Report event-weighted precision so bursts do not inflate apparent reliability."""
-    identities: dict[str, _IdentityMetrics] = {}
+    identities: dict[str, IdentityMetrics] = {}
     for name in names:
         selected = predicted == name
         correct = int(np.sum(selected & (targets == name)))
@@ -250,7 +253,9 @@ class IdentityModel:
         return np.where(accepted, winners, "")
 
 
-class _IdentityMetrics(TypedDict):
+class IdentityMetrics(TypedDict):
+    """Keep per-identity errors visible beside aggregate coverage."""
+
     correct: int
     accepted: int
     precision: float
@@ -273,7 +278,7 @@ class _Fold(TypedDict):
 
 
 class _Report(TypedDict):
-    identities: dict[str, _IdentityMetrics]
+    identities: dict[str, IdentityMetrics]
     unknown_accepted: int
     coverage: float
     folds: NotRequired[list[_Fold]]
@@ -285,4 +290,13 @@ class _Report(TypedDict):
     final_selection: NotRequired[_Selection]
 
 
-__all__ = ["IdentityModel", "capture_groups", "metrics", "train"]
+__all__ = [
+    "IdentityMetrics",
+    "IdentityModel",
+    "capture_groups",
+    "event_weights",
+    "metrics",
+    "passes",
+    "splits",
+    "train",
+]

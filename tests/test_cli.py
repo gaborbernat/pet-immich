@@ -21,7 +21,9 @@ if TYPE_CHECKING:
 
 
 @pytest.mark.parametrize(
-    "arguments", [[], ["import"], ["export-encoder"]], ids=["missing-command", "missing-import-paths", "missing-source"]
+    "arguments",
+    [[], ["import"], ["export-encoder"], ["compare"]],
+    ids=["missing-command", "missing-import-paths", "missing-source", "missing-similarities"],
 )
 def test_cli_requires_inputs(arguments: list[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("sys.argv", ["pet-immich", *arguments, "--state", str(tmp_path)])
@@ -35,6 +37,24 @@ def test_cli_trains_and_promotes(inference_state: Path, monkeypatch: pytest.Monk
     main()
     assert (inference_state / "approved.joblib").read_bytes() == (inference_state / "candidate.joblib").read_bytes()
     assert json.loads((inference_state / "validation.json").read_text())["passed"]
+
+
+@pytest.mark.parametrize("aligned", [True, False], ids=["aligned", "reordered"])
+def test_cli_compares_only_aligned_channels(
+    inference_state: Path, monkeypatch: pytest.MonkeyPatch, *, aligned: bool
+) -> None:
+    features = Features.load(inference_state / "features.npz")
+    similarities = inference_state / "similarities.npz"
+    np.savez(similarities, ids=features.ids if aligned else features.ids[::-1], raw=features.raw @ features.raw.T)
+    monkeypatch.setattr(
+        "sys.argv", ["pet-immich", "compare", "--state", str(inference_state), "--similarities", str(similarities)]
+    )
+    if aligned:
+        main()
+        assert json.loads((inference_state / "comparison.json").read_text())["raw"]["unique_photos"] == 72
+    else:
+        with pytest.raises(ValueError, match="Similarity IDs"):
+            main()
 
 
 def test_cli_failed_training_preserves_approved_model(

@@ -11,9 +11,11 @@ from urllib.parse import urlencode
 import httpx
 import numpy as np
 import onnxruntime as ort
+import torch
 from PIL import Image
 
 from pet_immich.data import Features, digest, normalize
+from pet_immich.miewid import load_miewid
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -37,10 +39,9 @@ def extract(
 ) -> Features:
     """Checkpoint by crop ID so interrupted backfills can resume without repeating inference."""
     models = models_directory or directory / "models"
+    encoder = "encoder.onnx" if (models / "encoder.onnx").exists() else "encoder.safetensors"
     signature = hashlib.sha256(
-        (
-            "views-v2|" + "|".join(digest(models / name) for name in ("encoder.onnx", "segment.pt", "localizer.tflite"))
-        ).encode()
+        ("views-v2|" + "|".join(digest(models / name) for name in (encoder, "segment.pt", "localizer.tflite"))).encode()
     ).hexdigest()
     cache = directory / "features.npz"
     existing = Features.load(cache) if cache.exists() and not refresh else None
@@ -146,8 +147,10 @@ class _Extractor:
 
         options = ort.SessionOptions()  # ty: ignore[possibly-missing-attribute] - native ONNX export.
         options.intra_op_num_threads = 2
-        self.encoder = ort.InferenceSession(
-            str(models / "encoder.onnx"), sess_options=options, providers=["CPUExecutionProvider"]
+        self.encoder = (
+            ort.InferenceSession(str(models / "encoder.onnx"), sess_options=options, providers=["CPUExecutionProvider"])
+            if (models / "encoder.onnx").exists()
+            else load_miewid(models / "encoder.safetensors")
         )
         self.segmenter = YOLO(str(models / "segment.pt"))
         self.localizer = Interpreter(model_path=str(models / "localizer.tflite"), num_threads=2)
@@ -193,12 +196,16 @@ def face_crop(image: Image.Image, box: Matrix) -> Image.Image:
     return image.crop(tuple(coordinates))
 
 
-def encode(session: ort.InferenceSession, images: list[Image.Image]) -> Matrix:
+def encode(session: ort.InferenceSession | torch.nn.Module, images: list[Image.Image]) -> Matrix:
     """Use the encoder training normalization for every animal view."""
-    pixels = np.stack([
-        np.asarray(image.resize((224, 224), Image.Resampling.BICUBIC), dtype=np.float32) / 255 for image in images
-    ])
+    size, resampling = (
+        (440, Image.Resampling.BILINEAR) if isinstance(session, torch.nn.Module) else (224, Image.Resampling.BICUBIC)
+    )
+    pixels = np.stack([np.asarray(image.resize((size, size), resampling), dtype=np.float32) / 255 for image in images])
     tensors = ((pixels - [0.485, 0.456, 0.406]) / [0.229, 0.224, 0.225]).transpose(0, 3, 1, 2).astype(np.float32)
+    if isinstance(session, torch.nn.Module):
+        with torch.inference_mode():
+            return normalize(session(torch.from_numpy(tensors)).numpy())
     return normalize(np.asarray(session.run(None, {session.get_inputs()[0].name: tensors})[0], dtype=np.float32))
 
 

@@ -25,7 +25,10 @@ dependencies = [
 ]
 optional-dependencies.vision = [
   "ai-edge-litert>=2.3",  # Run the dog-face landmark localizer.
+  "kornia>=0.8.3",        # Extract local descriptors and run learned pair matching.
   "onnx>=1.23.2",         # Validate and trim exported encoder graphs.
+  "safetensors>=0.8",     # Load MiewID weights without pickle.
+  "timm>=1.0.30",         # Reconstruct the MiewID image backbone.
   "torchvision>=0.29.1",  # Image operations required by segmentation and encoder models.
   "transformers>=5.20.2", # Load DINOv2 encoders for ONNX export.
   "ultralytics>=8.4.182", # Segment animals from photo backgrounds.
@@ -105,4 +108,11 @@ root_package = "pet_immich"
 name = "a layer imports only the layers below it"
 type = "layers"
 containers = [ "pet_immich" ]
-layers = [ "cli", "runtime", "model | importer | encoder", "extract | metric", "data" ]
+layers = [
+  "cli",
+  "runtime | benchmark",
+  "model | importer | encoder",
+  "extract | metric | grouping | matching",
+  "miewid",
+  "data"
+]

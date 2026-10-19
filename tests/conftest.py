@@ -7,6 +7,7 @@ import joblib
 import numpy as np
 import onnx
 import pytest
+import timm
 import torch
 from ai_edge_litert.interpreter import Interpreter
 from onnx import TensorProto, helper
@@ -94,3 +95,16 @@ def inference_state(tmp_path: Path, population: tuple[list[Sample], Features]) -
 @pytest.fixture
 def client_type() -> type[httpx.Client]:
     return httpx.Client
+
+
+@pytest.fixture
+def miewid_weights(tmp_path: Path, mocker: MockerFixture) -> Path:
+    backbone = timm.create_model("efficientnetv2_rw_m", pretrained=False, num_classes=0)
+    weights = {f"backbone.{name}": value for name, value in backbone.state_dict().items()}
+    weights["backbone.global_pool.p"] = torch.ones(1) * 3
+    weights.update({f"bn.{name}": value for name, value in torch.nn.BatchNorm1d(2152).state_dict().items()})
+    weights["final.weight"] = torch.zeros(10, 2152)
+    destination = tmp_path / "encoder.safetensors"
+    destination.write_bytes(b"synthetic-miewid-checkpoint")
+    mocker.patch("safetensors.torch.load_file", return_value=weights)
+    return destination

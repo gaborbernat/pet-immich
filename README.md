@@ -45,6 +45,13 @@ Place these weights in the private state directory's `models/` subdirectory:
 The face localizer's weights permit noncommercial use. Obtain suitable permissions or replace those weights for
 commercial use. Model weights are downloaded separately and never committed here.
 
+For encoder comparisons, use separate private state directories with identical samples. The larger Open Noodle model
+uses the same ONNX interface. To evaluate [MiewID-msv3](https://huggingface.co/conservationxlabs/miewid-msv3), put its
+`model.safetensors` at `models/encoder.safetensors` and omit `encoder.onnx`. The loader reconstructs the EfficientNetV2
+backbone, GeM pooling, and batch normalization from the published architecture and requires matching inference weights.
+It does not execute model-repository Python. MiewID uses 440-pixel bilinear resizing; Open Noodle uses 224-pixel bicubic
+resizing. Both use their published ImageNet channel normalization.
+
 ## Training and backfill
 
 The legacy importer accepts the detector's SQLite crop cache, a labels file, and a metadata CSV with `id` and
@@ -74,6 +81,42 @@ assignment. Missing segmentation and an ambiguous identity are different failure
 Application checks existing faces before each write, preserves conflicting assignments, verifies each creation, and
 saves a private audit. Repeating a completed run does not create duplicate faces. Conflicts appear in `plan.json` for
 diagnosis.
+
+## Comparing compositions
+
+`pet-immich compare --state "$EXPERIMENT_STATE" --similarities "$PAIR_SCORES"` evaluates every nonempty combination of
+the supplied similarity channels. The private NPZ input contains `ids`, matching `features.npz` in order, and one square
+pair-score array per channel. Use cosine similarities for frozen encoder embeddings and match scores for local
+descriptors; mark unavailable pairs with NaN. Only frozen, label-independent channels belong in this input. A matcher
+trained on these labels must produce its scores separately inside each training fold.
+
+Each combination learns pair-score weights on training events, selects confidence and runner-up margin thresholds on
+separate calibration events, and predicts held-out events. Unknown animals supply negative pairs. Reference scores
+average the strongest three events per identity, so one long burst cannot occupy all reference positions. The report
+counts ineligible extraction results in recall and counts accepted photos once.
+
+Calibration requires zero accepted errors across at least five events, matching the existing classifier's calibration
+policy. The held-out precision gate remains 95%; error-free calibration does not guarantee error-free predictions.
+
+`comparison.json` reports each composition on the same folds. It does not promote a model. Choosing the best result
+after inspecting this table is exploratory; a deployment claim needs a reserved evaluation set or nested selection of
+the composition itself. Increasing the channel count evaluates exponentially more combinations.
+
+Add `--duplicates` to compare each composition with and without direct duplicate propagation. This requires both high
+embedding similarity and a close perceptual hash, excludes other crops in the same photo, and rejects conflicting
+anchors. Propagated labels cannot become new anchors. Validation hides every evaluation label before propagation;
+production callers can supply confirmed labels so corrections take precedence. Capture timestamps only prevent split
+leakage; they cannot establish that two crops show the same dog.
+
+`pet_immich.matching.match_candidates` computes a local similarity channel from a global nearest-neighbor shortlist. It
+uses pretrained DISK descriptors and LightGlue correspondences, caches descriptors and symmetric pair scores, and binds
+the cache to the loaded weights, preprocessing, global encoder signature, candidate limit, and crop order. Uncomputed
+pairs remain NaN. Use a separate experiment directory when any of these inputs changes. This implementation uses frozen
+pretrained matching weights; it does not claim to reproduce WildMatch's identity-specific matcher training.
+
+For a deployment comparison, build candidate lists using each fold's reference gallery. A shortlist constructed from the
+entire evaluation collection is transductive: held-out images can occupy candidate positions even without labels. That
+experiment can identify promising combinations, but is not an independent deployment evaluation.
 
 ## Daily operation
 
