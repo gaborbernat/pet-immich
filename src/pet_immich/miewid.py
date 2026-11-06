@@ -28,9 +28,7 @@ class _MiewID(nn.Module):
         self.bn = nn.BatchNorm1d(2152)
 
     @override
-    def forward(  # ty: ignore[invalid-mutable-override] - torch declares forward as writable.
-        self, pixels: torch.Tensor
-    ) -> torch.Tensor:
+    def forward(self, pixels: torch.Tensor) -> torch.Tensor:
         return cast("torch.Tensor", self.bn(self.backbone(pixels).flatten(1)))
 
 
@@ -40,9 +38,7 @@ class _GeM(nn.Module):
         self.p = nn.Parameter(torch.ones(1) * 3)
 
     @override
-    def forward(  # ty: ignore[invalid-mutable-override] - torch declares forward as writable.
-        self, pixels: torch.Tensor
-    ) -> torch.Tensor:
+    def forward(self, pixels: torch.Tensor) -> torch.Tensor:
         return pixels.clamp(min=1e-6).pow(self.p).mean(dim=(-2, -1), keepdim=True).pow(1 / self.p)
 
 
