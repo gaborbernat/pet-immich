@@ -51,7 +51,7 @@ test = [
   "pytest-randomly>=5",
   "pytest-xdist>=3.8",
 ]
-type = [ "ty>=0.0.89", { include-group = "test" } ]
+type = [ "ty>=0.0.98", { include-group = "test" } ]
 lint = [ "prek>=0.5.6" ]
 pkg-meta = [ "check-wheel-contents>=0.6.3", "twine>=7", "uv>=0.13.1" ]
 
