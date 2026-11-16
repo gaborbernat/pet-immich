@@ -80,7 +80,7 @@ def test_matcher_learns_identity_correspondences() -> None:
     torch.manual_seed(42)
     matcher = LocalMatcher()
     matcher.matcher = LightGlue(
-        features=None,  # ty: ignore[invalid-argument-type] - Kornia explicitly supports uninitialized weights.
+        features=None,  # Kornia explicitly supports uninitialized weights.
         input_dim=128,
         descriptor_dim=32,
         n_layers=1,

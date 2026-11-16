@@ -22,7 +22,7 @@ def adaptation_state(
     from kornia.feature.lightglue import LightGlue  # ruff: ignore[import-outside-top-level] - native model.
 
     model = LightGlue(
-        features=None,  # ty: ignore[invalid-argument-type] - Kornia explicitly supports uninitialized weights.
+        features=None,  # Kornia explicitly supports uninitialized weights.
         input_dim=128,
         descriptor_dim=32,
         n_layers=1,
